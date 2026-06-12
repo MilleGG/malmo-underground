@@ -113,6 +113,16 @@ function ensureAudio() {
 /* ---------------- play state ---------------- */
 
 function startPlay() {
+  // file-based tracks decode their audio first (local: near-instant)
+  const pr = MUAudio.prepare(S.selSong);
+  if (pr && typeof pr.then === 'function') {
+    pr.then(beginPlay).catch(e => { console.error('track load failed', e); });
+  } else {
+    beginPlay();
+  }
+}
+
+function beginPlay() {
   const songIdx = S.selSong, charIdx = S.selChar;
   const diff = DIFFS[S.selDiff];
   const raw = filterNotes(MUAudio.buildNotes(songIdx), diff.id);
@@ -230,13 +240,14 @@ function judge(lane) {
   burst(HIT_X + 30, ry - 90 * ROW_SC[lane], LANE_COL[lane], perfect ? 16 : 9);
   P.shake = perfect ? 7 : 4;
   if (perfect) P.flash = 0.12;
-  // ULTIMATE: guns come out
+  // ULTIMATE: guns come out — time freezes for the cinematic
   const uAt = ch.ultraAt || 25;
   if (!P.ultra && P.combo >= uAt) {
     P.ultra = { state: 'intro', t0: S.t };
     P.pose = { kind: 'draw', t0: S.t };
     P.shake = 9; P.flash = 0.3;
     MUAudio.sfx('ultra');
+    MUAudio.pause(); // freeze the song clock: nothing moves, no beats are missed
   }
 }
 
@@ -284,11 +295,16 @@ function update(dt) {
   S.t += dt;
   if (S.scene !== 'play' || !P || P.paused) return;
   const audioNow = MUAudio.time();
+  const frozen = P.ultra && P.ultra.state === 'intro';
   // smooth clock: advance by frame dt, gently steered toward the audio clock
-  P.now += dt;
-  const drift = audioNow - P.now;
-  if (Math.abs(drift) > 0.1) P.now = audioNow;
-  else P.now += drift * 0.08;
+  if (frozen) {
+    P.now = audioNow; // time is suspended during the cinematic
+  } else {
+    P.now += dt;
+    const drift = audioNow - P.now;
+    if (Math.abs(drift) > 0.1) P.now = audioNow;
+    else P.now += drift * 0.08;
+  }
   const now = audioNow; // judging always uses the raw audio clock
 
   if (P.autoplay) {
@@ -297,14 +313,11 @@ function update(dt) {
     }
   }
 
-  // ultimate state machine
+  // ultimate state machine (the song is suspended during the intro)
   if (P.ultra) {
-    if (P.ultra.state === 'intro') {
-      // grace: notes arriving during the cinematic are auto-perfect
-      for (const n of P.active) {
-        if (n.state === 'wait' && now >= n.time - 0.01) judge(n.lane);
-      }
-      if (S.t - P.ultra.t0 > 0.85) P.ultra.state = 'active';
+    if (P.ultra.state === 'intro' && S.t - P.ultra.t0 > 1.1) {
+      P.ultra.state = 'active';
+      MUAudio.resume(); // un-freeze, back in sync
     }
     P.gunX += ((P.ultra.state === 'active' ? -65 : 0) - P.gunX) * Math.min(1, dt * 6);
   } else if (P.gunX !== 0) {
@@ -586,7 +599,7 @@ function renderPlay() {
   const py = lerp(ROW_Y[P.rowFrom], ROW_Y[P.row], easeOut(P.rowT));
   const psc = lerp(ROW_SC[P.rowFrom], ROW_SC[P.row], easeOut(P.rowT));
   const pvx = PLAYER_X + P.gunX;
-  const PDUR = { punch: 0.22, kick: 0.3, shoot: 0.16, hit: 0.4, draw: 0.85 };
+  const PDUR = { punch: 0.22, kick: 0.3, shoot: 0.16, hit: 0.4, draw: 1.1 };
   const poseT = clamp((S.t - P.pose.t0) / (PDUR[P.pose.kind] || 0.3), 0, 1);
   const baseKind = (P.ultra && P.ultra.state === 'active') ? 'gunidle' : 'idle';
   const poseKind = poseT >= 1 ? baseKind : P.pose.kind;
@@ -739,7 +752,7 @@ function renderPlay() {
 /* slow-mo anime cut-in when the ultimate triggers: letterbox bars,
    diagonal banner, radial speedlines, fighter drawing both guns */
 function renderCutIn() {
-  const ut = (S.t - P.ultra.t0) / 0.85;
+  const ut = (S.t - P.ultra.t0) / 1.1;
   const ch = CHARS[P.charIdx];
   const bh = 80 * Math.min(1, ut * 4);
   ctx.fillStyle = '#05030a';
@@ -926,6 +939,7 @@ addEventListener('keydown', e => {
       break;
     }
     case 'play':
+      if (P.ultra && P.ultra.state === 'intro') break; // time is frozen
       if (e.code in LANE_CODES && !P.paused) judge(LANE_CODES[e.code]);
       else if (e.code === 'Escape') {
         P.paused = !P.paused;

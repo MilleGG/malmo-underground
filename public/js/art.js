@@ -523,6 +523,26 @@ const CHARS = [
   }
 ];
 
+/* ================= SPRITE OVERRIDES =================
+   Drop transparent PNGs in assets/chars/<id>/<pose>.png (idle, punch, kick,
+   gunidle, shoot, hit, win, draw — plus portrait.png) and they replace the
+   code-drawn model. Same canvas size per pose, feet at the bottom, facing right. */
+const SPRITE_POSES = ['idle', 'punch', 'kick', 'gunidle', 'shoot', 'hit', 'win', 'draw', 'portrait'];
+const SPRITES = {};
+function loadSprites(id) {
+  SPRITES[id] = {};
+  for (const p of SPRITE_POSES) {
+    const img = new Image();
+    img.onload = () => { SPRITES[id][p] = img; };
+    img.src = `assets/chars/${id}/${p}.png`;
+  }
+}
+function spriteFor(id, kind) {
+  const s = SPRITES[id];
+  if (!s) return null;
+  return s[kind] || s.idle || null;
+}
+
 /* dual pistol, pointing +x from (x,y) */
 function drawGun(ctx, x, y, ang, flash) {
   ctx.save();
@@ -725,10 +745,466 @@ function fistShape(ctx, x, y, r, skin, big) {
   ctx.beginPath(); ctx.arc(x - r * 0.15, y - r * 0.62, r * 0.3, -2.6, -0.6); ctx.stroke();
 }
 
+/* ============ SAGA — high-fidelity profile model ============
+   Built to match the reference sheet's side view: thin lineart, flat
+   blue-tinted cel shade, 6.5-head proportions, seamless limbs. */
+
+/* one smooth two-segment limb with NO joint seam */
+function limbSmoothPath(c, a, b, e, ra, rb, re) {
+  const nrm = (p, q) => { const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; };
+  const n1 = nrm(a, b), n2 = nrm(b, e);
+  let nmx = (n1[0] + n2[0]) / 2, nmy = (n1[1] + n2[1]) / 2;
+  const nl = Math.hypot(nmx, nmy) || 1; nmx /= nl; nmy /= nl;
+  const th1 = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const th2 = Math.atan2(e[1] - b[1], e[0] - b[0]);
+  c.beginPath();
+  c.moveTo(a[0] + n1[0] * ra, a[1] + n1[1] * ra);
+  c.quadraticCurveTo(b[0] + nmx * rb, b[1] + nmy * rb, e[0] + n2[0] * re, e[1] + n2[1] * re);
+  c.arc(e[0], e[1], re, th2 + Math.PI / 2, th2 - Math.PI / 2, true);
+  c.quadraticCurveTo(b[0] - nmx * rb, b[1] - nmy * rb, a[0] - n1[0] * ra, a[1] - n1[1] * ra);
+  c.arc(a[0], a[1], ra, th1 - Math.PI / 2, th1 + Math.PI / 2, true);
+  c.closePath();
+}
+
+function drawSagaHi(ctx, pose) {
+  const k = pose.kind || 'idle';
+  const t = clamp(pose.t || 0, 0, 1);
+  const beat = pose.beat || 0;
+  const LINE = '#4a4350', LW = 2;
+  const SKIN = '#f6d7c0', SKIN_F = '#e3bfa9';
+  const HAIR = '#e9edf2', HAIR_SH = '#c3cbd8';
+  const TOP = '#aeb4bc', DARK = '#23242a', SHORT = '#9aa1ab';
+  const SHADE = 'rgba(108,132,196,0.25)';
+
+  const flat = (build, fill, lw, line) => {
+    build(ctx); ctx.fillStyle = fill; ctx.fill();
+    build(ctx); ctx.strokeStyle = line || LINE; ctx.lineWidth = lw || LW;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+  };
+  const shadeFill = build => { build(ctx); ctx.fillStyle = SHADE; ctx.fill(); };
+  const limb = (a, b, e, ra, rb, re, fill) =>
+    flat(c => limbSmoothPath(c, a, b, e, ra, rb, re), fill);
+
+  // ---- pose params
+  const gun = k === 'gunidle' || k === 'shoot' || k === 'draw';
+  let ext = 0, kext = 0, lean = 0, shift = 0;
+  if (k === 'punch') { ext = t < 0.34 ? easeOut(t / 0.34) : 1 - (t - 0.34) / 0.66 * 0.75; shift = ext * 14; lean = ext * 0.07; }
+  if (k === 'kick') { kext = t < 0.36 ? easeOut(t / 0.36) : 1 - (t - 0.36) / 0.64 * 0.7; lean = -kext * 0.1; }
+  if (k === 'hit') { lean = -Math.sin(t * Math.PI) * 0.14; shift = -Math.sin(t * Math.PI) * 12; }
+  const bob = (k === 'idle' || k === 'gunidle' || k === 'win') ? -Math.abs(Math.sin(beat * Math.PI)) * 4 : 0;
+  let recF = 0, recB = 0;
+  if (k === 'shoot') { const rec = 1 - t; if ((pose.arm || 0) === 0) recF = rec; else recB = rec; }
+  const drawT = k === 'draw' ? t : 1;
+
+  ctx.save();
+  ctx.translate(shift, bob);
+
+  // ================= FAR LIMBS =================
+  let farHand;
+  if (gun) farHand = [lerp(16, 56, drawT), lerp(-148, -186 - recB * 10, drawT)];
+  else if (k === 'punch') farHand = [-10, -160];
+  else if (k === 'kick') farHand = [24, -178];
+  else if (k === 'hit') farHand = [-18, -150];
+  else if (k === 'win') farHand = [4, -150];
+  else farHand = [-3, -148];
+  const farElb = gun ? [lerp(2, 28, drawT), lerp(-168, -190, drawT)]
+    : [farHand[0] * 0.4 - 4, -174];
+  limb([-6, -206], farElb, farHand, 4.8, 4.2, 3.6, SKIN_F);
+  if (gun) drawGun(ctx, farHand[0], farHand[1] - 2, (1 - drawT) * 1.1 - recB * 0.3,
+    (k === 'shoot' && (pose.arm || 0) === 1 && t < 0.35) ? 1 - t / 0.35 : 0);
+  // far leg + far sneaker
+  limb([-5, -122], [-8, -62], [-11, -12], 9, 6.2, 4.4, SKIN_F);
+  sagaSneaker(ctx, -11, 0, 0, true);
+
+  // ================= NEAR LEG =================
+  let nKnee = [7, -60], nAnkle = [4, -12], shoeAng = 0;
+  if (k === 'kick') {
+    nKnee = [lerp(7, 48, kext), lerp(-60, -112, kext)];
+    nAnkle = [lerp(4, 102, kext), lerp(-12, -118, kext)];
+    shoeAng = Math.atan2(nAnkle[1] - nKnee[1], nAnkle[0] - nKnee[0]) + Math.PI / 2;
+  }
+  limb([6, -124], nKnee, nAnkle, 9.5, 6.4, 4.6, SKIN);
+  // subtle calf hint
+  ctx.strokeStyle = 'rgba(150,110,90,0.35)'; ctx.lineWidth = 1.4;
+  if (k !== 'kick') {
+    ctx.beginPath();
+    ctx.moveTo(nAnkle[0] - 5, -44);
+    ctx.quadraticCurveTo(nAnkle[0] - 7, -34, nAnkle[0] - 5, -24);
+    ctx.stroke();
+  }
+  sagaSneaker(ctx, nAnkle[0], nAnkle[1] + (k === 'kick' ? 4 : 12) * (k === 'kick' ? 0 : 0) + (k === 'kick' ? 0 : 12) - 12, shoeAng, false);
+
+  // ================= TORSO (leans as one unit) =================
+  ctx.save();
+  ctx.translate(0, -132); ctx.rotate(lean); ctx.translate(0, 132);
+  // skin: neck → chest → midriff → hip, back line up
+  flat(c => {
+    c.beginPath();
+    c.moveTo(8, -226);
+    c.lineTo(10, -218);
+    c.quadraticCurveTo(17, -212, 17.5, -196);   // bust
+    c.quadraticCurveTo(15, -187, 11, -184);     // under bust
+    c.quadraticCurveTo(12, -165, 10, -150);     // stomach
+    c.lineTo(11, -138);
+    c.lineTo(-15, -138);
+    c.quadraticCurveTo(-12, -162, -14, -184);   // lower back
+    c.quadraticCurveTo(-16, -205, -12, -214);   // upper back
+    c.quadraticCurveTo(-7, -222, -3, -225);     // nape
+    c.closePath();
+  }, SKIN);
+  // navel
+  ctx.strokeStyle = 'rgba(150,110,90,0.55)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(6.5, -152); ctx.lineTo(6.5, -147); ctx.stroke();
+  // flat shade along the back
+  shadeFill(c => {
+    c.beginPath();
+    c.moveTo(-15, -138);
+    c.quadraticCurveTo(-12, -162, -14, -184);
+    c.quadraticCurveTo(-16, -205, -12, -214);
+    c.lineTo(-8, -212);
+    c.quadraticCurveTo(-11, -200, -9.5, -184);
+    c.quadraticCurveTo(-8, -160, -10.5, -138);
+    c.closePath();
+  });
+  // grey halter crop top
+  flat(c => {
+    c.beginPath();
+    c.moveTo(6, -224);
+    c.quadraticCurveTo(15, -214, 17.5, -198);
+    c.quadraticCurveTo(16.5, -185, 12, -180);
+    c.lineTo(-14.5, -180);
+    c.quadraticCurveTo(-15.5, -198, -12.5, -213);
+    c.quadraticCurveTo(-7, -221, -2, -224);
+    c.closePath();
+  }, TOP);
+  // under-bust shade on the top
+  shadeFill(c => {
+    c.beginPath();
+    c.moveTo(15, -192);
+    c.quadraticCurveTo(13, -184, 9, -181);
+    c.lineTo(0, -181);
+    c.quadraticCurveTo(9, -185, 12, -193);
+    c.closePath();
+  });
+  // black bottom band + halter collar
+  ctx.strokeStyle = DARK; ctx.lineWidth = 4.6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(12, -180); ctx.lineTo(-14.5, -180); ctx.stroke();
+  ctx.lineWidth = 3.4;
+  ctx.beginPath(); ctx.moveTo(6, -224); ctx.lineTo(-2, -224); ctx.stroke();
+  // neck shadow under the jaw
+  shadeFill(c => {
+    c.beginPath();
+    c.moveTo(8, -226); c.lineTo(9.5, -219); c.lineTo(-3, -224); c.closePath();
+  });
+
+  // ================= HEAD (profile) =================
+  // face
+  flat(c => {
+    c.beginPath();
+    c.moveTo(-15, -260);
+    c.quadraticCurveTo(-10, -270, 2, -270.5);
+    c.quadraticCurveTo(13, -269, 16.5, -258);  // forehead
+    c.lineTo(16, -252.5);                       // brow dip
+    c.quadraticCurveTo(20.5, -249.5, 21, -246.5); // nose
+    c.quadraticCurveTo(19, -243.5, 16.5, -242.5);
+    c.lineTo(17.5, -239.5);                     // upper lip
+    c.lineTo(16, -237.5);
+    c.quadraticCurveTo(18.5, -233.5, 13, -230.5); // chin
+    c.quadraticCurveTo(3, -227.5, -5, -233);    // jaw
+    c.quadraticCurveTo(-14, -242, -15, -260);
+    c.closePath();
+  }, SKIN);
+  // profile eye
+  if (k === 'hit') {
+    ctx.strokeStyle = LINE; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(13, -252); ctx.lineTo(5, -249); ctx.lineTo(13, -246); ctx.stroke();
+  } else {
+    // sclera
+    flat(c => {
+      c.beginPath();
+      c.moveTo(4, -254);
+      c.quadraticCurveTo(10, -255.5, 14, -254);
+      c.quadraticCurveTo(14.5, -249, 12.5, -245.5);
+      c.quadraticCurveTo(7, -244.5, 5, -246.5);
+      c.quadraticCurveTo(3.5, -250.5, 4, -254);
+      c.closePath();
+    }, '#fdfbf6', 1.2, 'rgba(74,67,80,0.45)');
+    // iris — vertical, blue gradient
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(9.5, -250, 3.4, 4.6, 0, 0, TAU); ctx.clip();
+    const ig = ctx.createLinearGradient(0, -255, 0, -245);
+    ig.addColorStop(0, '#2a5d9e'); ig.addColorStop(0.45, '#7fb3e8'); ig.addColorStop(1, '#cfe8fa');
+    ctx.fillStyle = ig; ctx.fillRect(4, -256, 12, 12);
+    ctx.fillStyle = '#1c2b4a';
+    ctx.beginPath(); ctx.ellipse(9.5, -250.5, 1.5, 2.2, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(8, -252.5, 1.3, 0, TAU); ctx.fill();
+    ctx.restore();
+    // heavy top lash
+    ctx.strokeStyle = '#3a3340'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(3.5, -253.5);
+    ctx.quadraticCurveTo(9, -256.5, 14.5, -254.5);
+    ctx.stroke();
+  }
+  // brow
+  ctx.strokeStyle = '#8a8694'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(5, -259.5); ctx.quadraticCurveTo(11, -261, 15.5, -259); ctx.stroke();
+  // mouth
+  ctx.strokeStyle = '#a4606a'; ctx.lineWidth = 1.8;
+  if (k === 'punch' || k === 'kick' || k === 'shoot') {
+    flat(c => {
+      c.beginPath();
+      c.moveTo(15.5, -237.5);
+      c.quadraticCurveTo(18, -236, 16.5, -233.5);
+      c.quadraticCurveTo(13.5, -233.5, 13.5, -236);
+      c.closePath();
+    }, '#7d3a48', 1.2, '#5d2a35');
+  } else if (k === 'win') {
+    ctx.beginPath(); ctx.moveTo(12.5, -236.5); ctx.quadraticCurveTo(15.5, -234, 17, -237.5); ctx.stroke();
+  } else if (k === 'hit') {
+    ctx.beginPath(); ctx.moveTo(12, -236); ctx.lineTo(14.5, -234.5); ctx.lineTo(16.5, -236.5); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(14, -236); ctx.lineTo(16.5, -236.8); ctx.stroke();
+  }
+
+  // ================= HAIR (silver bob, profile) =================
+  flat(c => {
+    c.beginPath();
+    c.moveTo(15.5, -261);                       // front hairline
+    c.lineTo(12.5, -255.5);                     // bang notch 1
+    c.lineTo(9.5, -258);
+    c.lineTo(5.5, -255);                        // bang notch 2
+    c.lineTo(1.5, -257.5);
+    c.lineTo(-0.5, -252);                       // side lock front edge
+    c.quadraticCurveTo(-1.5, -242, -3.5, -233); // down the cheek side
+    c.lineTo(-7, -229.5);                       // blunt tip flip
+    c.lineTo(-13.5, -232);
+    c.quadraticCurveTo(-18.5, -238, -19.5, -248); // back of bob
+    c.quadraticCurveTo(-20.5, -262, -12.5, -269);
+    c.quadraticCurveTo(-2, -274.5, 8, -271.5);  // crown
+    c.quadraticCurveTo(14.5, -268.5, 15.5, -261);
+    c.closePath();
+  }, HAIR);
+  // darker inner zone at the bottom of the bob
+  shadeFill(c => {
+    c.beginPath();
+    c.moveTo(-0.5, -252);
+    c.quadraticCurveTo(-1.5, -242, -3.5, -233);
+    c.lineTo(-7, -229.5);
+    c.lineTo(-13.5, -232);
+    c.quadraticCurveTo(-16, -235, -17.5, -240);
+    c.lineTo(-10, -241);
+    c.quadraticCurveTo(-5, -244, -2.5, -248);
+    c.closePath();
+  });
+  // strand lines
+  ctx.strokeStyle = HAIR_SH; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(8 - i * 7, -269 + i * 1.5);
+    ctx.quadraticCurveTo(9 - i * 7, -263, 7.5 - i * 7, -257 + i * 0.8);
+    ctx.stroke();
+  }
+  // glossy crown shine
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(10, -266.5);
+  ctx.quadraticCurveTo(0, -271, -10, -266.5);
+  ctx.stroke();
+
+  ctx.restore(); // end torso/head lean group
+
+  // ================= SHORTS + BELT =================
+  flat(c => {
+    c.beginPath();
+    c.moveTo(-16, -140);
+    c.lineTo(12, -140);
+    c.quadraticCurveTo(11, -118, 9, -100);     // front edge
+    c.lineTo(-2, -98);
+    c.lineTo(-3, -105);                         // crotch notch
+    c.lineTo(-5, -97);
+    c.lineTo(-14, -99);
+    c.quadraticCurveTo(-18.5, -116, -16.5, -132); // butt curve
+    c.closePath();
+  }, SHORT);
+  // flat shade on the back of the shorts
+  shadeFill(c => {
+    c.beginPath();
+    c.moveTo(-14, -99);
+    c.quadraticCurveTo(-18.5, -116, -16.5, -132);
+    c.lineTo(-11.5, -130);
+    c.quadraticCurveTo(-13, -114, -9.5, -99.5);
+    c.closePath();
+  });
+  // black hems
+  ctx.strokeStyle = DARK; ctx.lineWidth = 3.4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(9, -100); ctx.lineTo(-2, -98); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-5, -97); ctx.lineTo(-14, -99); ctx.stroke();
+  // belt + buckle
+  flat(c => {
+    c.beginPath();
+    c.moveTo(-16, -146); c.lineTo(12, -146); c.lineTo(12, -139); c.lineTo(-16, -139);
+    c.closePath();
+  }, DARK, 1.4);
+  ctx.fillStyle = '#d8dce2';
+  ctx.fillRect(1, -146.5, 6, 8);
+  ctx.strokeStyle = LINE; ctx.lineWidth = 1.2;
+  ctx.strokeRect(1, -146.5, 6, 8);
+
+  // ================= NEAR ARM =================
+  let nSh = [2, -208], nElb, nHand;
+  if (gun) {
+    nElb = [lerp(6, 34, drawT), lerp(-160, -196, drawT)];
+    nHand = [lerp(2, 64, drawT), lerp(-140, -192 - recF * 10, drawT)];
+  } else if (k === 'punch') {
+    nElb = [lerp(10, 50, ext), lerp(-176, -198, ext)];
+    nHand = [lerp(13, 96, ext), lerp(-150, -198, ext)];
+  } else if (k === 'kick') {
+    nElb = [-6, -180]; nHand = [-16, -188];
+  } else if (k === 'hit') {
+    nElb = [4, -172]; nHand = [-8, -150];
+  } else if (k === 'win') {
+    nElb = [15, -240]; nHand = [16, -274];
+  } else {
+    nElb = [10, -176]; nHand = [12 + Math.sin(beat * TAU) * 1.5, -146];
+  }
+  limb(nSh, nElb, nHand, 5.2, 4.4, 3.8, SKIN);
+  // yellow ribbon on the upper arm
+  const rbx = lerp(nSh[0], nElb[0], 0.45), rby = lerp(nSh[1], nElb[1], 0.45);
+  ctx.strokeStyle = '#f2d22e'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(rbx - 5, rby - 2); ctx.lineTo(rbx + 5, rby + 1); ctx.stroke();
+  ctx.fillStyle = '#f2d22e'; ctx.strokeStyle = '#b89a10'; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(rbx - 4, rby - 1);
+  ctx.lineTo(rbx - 13, rby - 8); ctx.lineTo(rbx - 9, rby + 1); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(rbx - 4, rby);
+  ctx.lineTo(rbx - 13, rby + 4); ctx.lineTo(rbx - 7, rby + 7); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // hand
+  flat(c => { c.beginPath(); c.arc(nHand[0], nHand[1], k === 'punch' ? 5.4 : 4.6, 0, TAU); }, SKIN);
+  if (k === 'win') {
+    // raised index finger
+    ctx.strokeStyle = LINE; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(nHand[0] + 1, nHand[1] - 3); ctx.lineTo(nHand[0] + 3, nHand[1] - 14); ctx.stroke();
+    ctx.strokeStyle = SKIN; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(nHand[0] + 1, nHand[1] - 3); ctx.lineTo(nHand[0] + 3, nHand[1] - 13); ctx.stroke();
+  }
+  if (gun) drawGun(ctx, nHand[0], nHand[1] - 2, (1 - drawT) * 1.1 - recF * 0.3,
+    (k === 'shoot' && (pose.arm || 0) === 0 && t < 0.35) ? 1 - t / 0.35 : 0);
+
+  // ================= STRIKE EFFECTS =================
+  const strikeEnd = (k === 'punch' && ext > 0.7) ? nHand : (k === 'kick' && kext > 0.7) ? nAnkle : null;
+  if (strikeEnd) {
+    const sext = k === 'punch' ? ext : kext;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineCap = 'round';
+    for (let i = -1; i <= 1; i++) {
+      ctx.lineWidth = i === 0 ? 3 : 1.8;
+      ctx.beginPath();
+      ctx.moveTo(strikeEnd[0] - 30, strikeEnd[1] + i * 9);
+      ctx.lineTo(strikeEnd[0] - 110 - Math.abs(i) * 16, strikeEnd[1] + i * 12);
+      ctx.stroke();
+    }
+    if (sext > 0.85) {
+      ctx.translate(strikeEnd[0] + 9, strikeEnd[1]);
+      ctx.rotate(sext * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        const rad = i % 2 ? 5 : 16;
+        ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* profile high-top sneaker matching the sheet: white, black panels, yellow strap, star */
+function sagaSneaker(ctx, x, y, ang, far) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  const LINE = '#4a4350';
+  const body = far ? '#dfe0e3' : '#f8f8f8';
+  // upper
+  ctx.beginPath();
+  ctx.moveTo(-7, 0);
+  ctx.lineTo(-7.5, -14);
+  ctx.quadraticCurveTo(-2, -16.5, 3, -13.5);
+  ctx.quadraticCurveTo(9, -10, 15, -5.5);
+  ctx.quadraticCurveTo(17.5, -3.5, 17, 0);
+  ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();
+  ctx.strokeStyle = LINE; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.stroke();
+  // black heel + toe panels
+  ctx.fillStyle = '#23242a';
+  ctx.beginPath();
+  ctx.moveTo(-7, 0); ctx.lineTo(-7.5, -13); ctx.lineTo(-3, -11); ctx.lineTo(-2.5, 0);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(11, 0); ctx.lineTo(11.5, -4.5); ctx.quadraticCurveTo(14.5, -3.5, 17, 0);
+  ctx.closePath(); ctx.fill();
+  // sole
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = LINE; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-8, 0); ctx.lineTo(17.5, 0); ctx.lineTo(17.5, 2.6); ctx.lineTo(-8, 2.6);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // yellow collar strap
+  ctx.strokeStyle = '#f2d22e'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-6.5, -12); ctx.lineTo(-1, -10.5); ctx.stroke();
+  // laces
+  ctx.strokeStyle = 'rgba(74,67,80,0.5)'; ctx.lineWidth = 1.2;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(2 + i * 2.4, -10 + i * 1.8);
+    ctx.lineTo(6 + i * 2.4, -8.5 + i * 1.8);
+    ctx.stroke();
+  }
+  // star
+  ctx.fillStyle = '#23242a';
+  ctx.save();
+  ctx.translate(3.5, -5.5);
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    const rad = i % 2 ? 1.4 : 3.2;
+    ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
 /* drawFighter: origin at feet center, facing +x.
    pose: {kind:'idle'|'punch'|'hit'|'win', t:0..1, beat, aim} */
 function drawFighter(ctx, idx, pose) {
   const ch = CHARS[idx];
+  // player-supplied sprite override
+  const spr = spriteFor(ch.id, pose.kind || 'idle');
+  if (spr) {
+    const hgt = 280 * ch.h;
+    const wid = spr.width / spr.height * hgt;
+    const sBob = (pose.kind === 'idle' || !pose.kind) ? -Math.abs(Math.sin((pose.beat || 0) * Math.PI)) * 4 : 0;
+    ctx.drawImage(spr, -wid / 2, -hgt + sBob, wid, hgt);
+    return;
+  }
+  if (ch.id === 'saga') {
+    ctx.save();
+    ctx.scale(ch.h, ch.h);
+    drawSagaHi(ctx, pose);
+    ctx.restore();
+    return;
+  }
   const k = pose.kind || 'idle';
   const t = clamp(pose.t || 0, 0, 1);
   const beat = pose.beat || 0;
@@ -1584,6 +2060,9 @@ function vignette(ctx) {
 }
 
 function resetCache() { wallCache = null; signCache = null; wallHue = -1; signHue = -1; }
+
+// try to load sprite overrides for every fighter (404s are silently ignored)
+CHARS.forEach(c => loadSprites(c.id));
 
 return { CHARS, drawFighter, drawEnemy, drawKeyBadge, drawBG, drawPortrait, vignette, resetCache, FLOOR_Y, rr, lerp, clamp, easeOut };
 

@@ -8,7 +8,7 @@ const MUAudio = (() => {
 
 let ctx = null, busM = null, busS = null, master = null, comp = null;
 let delayNode = null, dSend = null;
-let noiseBuf = null;
+let noiseBuf = null, stingCtx = null;
 let cur = null;
 let events = [], evPtr = 0, startAt = 0, schedTimer = null;
 let playing = false;
@@ -730,6 +730,77 @@ function barPat(p, b) {
   return Array.isArray(p) ? p[b % p.length] : p;
 }
 
+/* ---------- file-based tracks (player-supplied music) ----------
+   TRACKS entry shape: { id, name, sub, bpm, hue, approach, stars,
+                         file: 'tracks/song.mp3', offset: secondsToFirstBeat }
+   The chart is generated procedurally on the 16th grid from the BPM. */
+
+function isFileTrack(tr) { return !!tr.file; }
+
+function prepare(i) {
+  const tr = TRACKS[i];
+  if (!tr || !isFileTrack(tr) || tr._buffer) return null; // nothing to load — stay synchronous
+  ensure();
+  if (!tr._loading) {
+    tr._loading = fetch(tr.file)
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + tr.file); return r.arrayBuffer(); })
+      .then(ab => ctx.decodeAudioData(ab))
+      .then(buf => { tr._buffer = buf; });
+  }
+  return tr._loading;
+}
+
+// deterministic chart patterns by intensity tier
+const GEN_LOW = ['d...f...j...k...', 'k...j...f...d...', 'd...j...f...k...', 'f...k...d...j...'];
+const GEN_MID = ['d...f...j...k.j.', 'd.f.j...k...j...', 'k...j.f.d...f...', 'd...f.j.k...j.f.'];
+const GEN_HIGH = ['d.f.j.k.d.f.j.k.', 'k.j.f.d.k.j.f.d.', 'd.j.f.k.d.j.f.k.', 'd.f.j...k.j.f...'];
+
+function genBarsFor(tr) {
+  const beats = (tr._buffer ? tr._buffer.duration - (tr.offset || 0) : 60) * tr.bpm / 60;
+  return Math.max(8, Math.floor(beats / 4));
+}
+
+/* bar index → energy tier: intro light, 8-bar grooves alternating with breaks */
+function genTier(bar, bars) {
+  if (bar < 4 || bar >= bars - 2) return 0;            // intro / outro: nothing
+  const phase = (bar - 4) % 24;
+  if (phase < 8) return 1;                              // groove
+  if (phase < 12) return 0.5;                           // breather
+  if (phase < 20) return 2;                             // drop
+  return 0.5;
+}
+
+function genNotes(tr) {
+  const spb = 60 / tr.bpm;
+  const off = tr.offset || 0;
+  const bars = genBarsFor(tr);
+  const notes = [];
+  for (let b = 0; b < bars; b++) {
+    const tier = genTier(b, bars);
+    if (tier === 0) continue;
+    const bank = tier === 0.5 ? GEN_LOW : tier === 1 ? GEN_MID : GEN_HIGH;
+    const pat = bank[(b * 7 + (tr.id.length * 3)) % bank.length];
+    for (let s = 0; s < 16; s++) {
+      const lane = 'dfjk'.indexOf(pat[s]);
+      if (lane >= 0) {
+        const beat = b * 4 + s / 4;
+        notes.push({ beat, time: beat * spb + off, lane });
+      }
+    }
+  }
+  return notes;
+}
+
+function genSections(tr) {
+  const bars = genBarsFor(tr);
+  const secs = [];
+  for (let b = 0; b < bars; b++) {
+    const tier = genTier(b, bars);
+    secs.push({ startBeat: b * 4, endBeat: (b + 1) * 4, energy: tier === 0 ? 0.2 : tier === 0.5 ? 0.35 : tier === 1 ? 0.6 : 0.95 });
+  }
+  return secs;
+}
+
 function buildEvents(tr) {
   const ev = [];
   const swA = tr.swing || 0;
@@ -773,6 +844,7 @@ function buildEvents(tr) {
 
 function buildNotes(i) {
   const tr = TRACKS[i];
+  if (isFileTrack(tr)) return genNotes(tr);
   const spb = 60 / tr.bpm;
   const notes = [];
   let bar = 0;
@@ -800,6 +872,14 @@ function buildNotes(i) {
 
 function trackInfo(i) {
   const tr = TRACKS[i];
+  if (isFileTrack(tr)) {
+    return {
+      id: tr.id, name: tr.name, sub: tr.sub, bpm: tr.bpm, hue: tr.hue,
+      approach: tr.approach || 1.9, stars: tr.stars || 2,
+      duration: tr._buffer ? tr._buffer.duration : 60,
+      sections: genSections(tr)
+    };
+  }
   let bars = 0;
   const secs = tr.sections.map(s => {
     const o = { startBeat: bars * 4, endBeat: (bars + s.bars) * 4, energy: s.energy || 0.3 };
@@ -839,15 +919,26 @@ function fire(e, t, tr) {
 function start(tr) {
   unlock();
   stopInternal();
-  const built = buildEvents(tr);
   cur = tr;
-  cur._events = built.ev;
-  cur._totalBeats = built.totalBeats;
   evPtr = 0;
   startAt = ctx.currentTime + 0.9;
   playing = true;
   busM.gain.cancelScheduledValues(ctx.currentTime);
   busM.gain.setValueAtTime(1, ctx.currentTime);
+  if (isFileTrack(tr)) {
+    // player-supplied audio file: one buffer source on the same clock
+    const src = ctx.createBufferSource();
+    src.buffer = tr._buffer;
+    src.connect(busM);
+    src.start(startAt);
+    cur._src = src;
+    cur._events = [];
+    cur._totalBeats = genBarsFor(tr) * 4;
+    return;
+  }
+  const built = buildEvents(tr);
+  cur._events = built.ev;
+  cur._totalBeats = built.totalBeats;
   delayNode.delayTime.value = 60 / tr.bpm * 0.75;
   schedTimer = setInterval(schedule, 25);
   schedule();
@@ -874,6 +965,10 @@ function schedule() {
 
 function stopInternal() {
   if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+  if (cur && cur._src) {
+    try { cur._src.stop(); } catch (e) {}
+    cur._src = null;
+  }
   playing = false;
   cur = null;
 }
@@ -914,20 +1009,44 @@ function sfx(name) {
       break;
     }
     case 'ultra': {
-      // dramatic sting: riser sweep + impact + power chord
-      const s = ctx.createBufferSource(); s.buffer = getNoise(); s.loop = true;
-      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.4;
-      f.frequency.setValueAtTime(400, t);
-      f.frequency.exponentialRampToValueAtTime(6500, t + 0.5);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.001, t);
-      g.gain.exponentialRampToValueAtTime(0.35, t + 0.5);
-      g.gain.linearRampToValueAtTime(0, t + 0.6);
-      s.connect(f); f.connect(g); g.connect(busS);
-      s.start(t); s.stop(t + 0.65);
-      kick(t + 0.5, { drop: 200, tail: 36, decay: 0.6, gain: 1.1 });
-      [220, 277, 330].forEach(fr => tone(t + 0.5, fr, 0.5, 'sawtooth', 0.07));
-      noiseHit(t + 0.5, 0.7, 5500, 'highpass', 0.18, 0.6, busS);
+      // dramatic sting on its OWN context so it plays while the main
+      // clock is suspended for the cinematic time-freeze
+      if (!stingCtx) stingCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const c2 = stingCtx;
+      if (c2.state !== 'running') c2.resume();
+      const t2 = c2.currentTime + 0.01;
+      const nb = c2.createBuffer(1, (c2.sampleRate * 1.4) | 0, c2.sampleRate);
+      const nd = nb.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      // riser
+      const s = c2.createBufferSource(); s.buffer = nb; s.loop = true;
+      const f = c2.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.4;
+      f.frequency.setValueAtTime(400, t2);
+      f.frequency.exponentialRampToValueAtTime(6500, t2 + 0.55);
+      const g = c2.createGain();
+      g.gain.setValueAtTime(0.001, t2);
+      g.gain.exponentialRampToValueAtTime(0.3, t2 + 0.55);
+      g.gain.linearRampToValueAtTime(0, t2 + 0.65);
+      s.connect(f); f.connect(g); g.connect(c2.destination);
+      s.start(t2); s.stop(t2 + 0.7);
+      // impact at the drop
+      const ko = c2.createOscillator(); ko.type = 'sine';
+      ko.frequency.setValueAtTime(200, t2 + 0.55);
+      ko.frequency.exponentialRampToValueAtTime(36, t2 + 0.66);
+      const kg = c2.createGain();
+      kg.gain.setValueAtTime(0.9, t2 + 0.55);
+      kg.gain.exponentialRampToValueAtTime(0.001, t2 + 1.15);
+      ko.connect(kg); kg.connect(c2.destination);
+      ko.start(t2 + 0.55); ko.stop(t2 + 1.2);
+      // power chord
+      [220, 277, 330].forEach(fr => {
+        const o = c2.createOscillator(); o.type = 'sawtooth'; o.frequency.value = fr;
+        const og = c2.createGain();
+        og.gain.setValueAtTime(0.06, t2 + 0.55);
+        og.gain.exponentialRampToValueAtTime(0.001, t2 + 1.1);
+        o.connect(og); og.connect(c2.destination);
+        o.start(t2 + 0.55); o.stop(t2 + 1.15);
+      });
       break;
     }
     case 'hurt': {
@@ -961,6 +1080,7 @@ function sfx(name) {
 return {
   unlock,
   play: i => start(TRACKS[i]),
+  prepare,
   playMenu: () => start(MENU),
   stop,
   sfx,
