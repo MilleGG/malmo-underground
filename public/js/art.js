@@ -494,7 +494,7 @@ const CHARS = [
     h: 1.02, headR: 21, wide: 1.16,
     skin: '#f4c79b', iris: ['#bfe8ff', '#5da9dd', '#1d4e7a'], eyeW: 0.44, eyeH: 0.4,
     rim: 'rgba(62,230,255,0.4)',
-    theme: '#ffd34d'
+    theme: '#ffd34d', sprH: 295
   },
   {
     id: 'vilgot', name: 'VILGOT', epithet: 'SMOOTH OPERATOR',
@@ -502,7 +502,7 @@ const CHARS = [
     h: 1.14, headR: 21, wide: 0.97, shades: true,
     skin: '#eebd92', iris: ['#cbb59a', '#8a6a48', '#3c2a18'], eyeW: 0.42, eyeH: 0.36,
     rim: 'rgba(255,79,216,0.4)',
-    theme: '#3ee6ff'
+    theme: '#3ee6ff', sprH: 305
   },
   {
     id: 'mille', name: 'MILLE', epithet: 'ANGEL FACE',
@@ -510,7 +510,7 @@ const CHARS = [
     h: 0.88, headR: 24, wide: 1.0, blush: true,
     skin: '#fad7b2', iris: ['#d2f7d9', '#62c98a', '#1f6b46'], eyeW: 0.52, eyeH: 0.5,
     rim: 'rgba(255,210,74,0.45)',
-    theme: '#7dff5e'
+    theme: '#7dff5e', sprH: 215, sprFloat: true
   },
   {
     id: 'saga', name: 'SAGA', epithet: 'SILVERPILEN',
@@ -529,11 +529,60 @@ const CHARS = [
    code-drawn model. Same canvas size per pose, feet at the bottom, facing right. */
 const SPRITE_POSES = ['idle', 'punch', 'kick', 'gunidle', 'shoot', 'hit', 'win', 'draw', 'portrait'];
 const SPRITES = {};
+
+/* knock out the (near-)white studio background via flood fill from the
+   borders, so interior whites (shirts, wings) survive */
+function processSprite(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  let id;
+  try { id = g.getImageData(0, 0, c.width, c.height); } catch (e) { return img; }
+  const d = id.data, w = c.width, h = c.height;
+  const px = (x, y) => (y * w + x) * 4;
+  // background colour from the four corners
+  const cs = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+  const bg = [0, 1, 2].map(k => cs.reduce((s, i) => s + d[i + k], 0) / 4);
+  const tol = 16;
+  const isBg = i => Math.abs(d[i] - bg[0]) < tol && Math.abs(d[i + 1] - bg[1]) < tol && Math.abs(d[i + 2] - bg[2]) < tol;
+  const visited = new Uint8Array(w * h);
+  const stack = [];
+  for (let x = 0; x < w; x++) { stack.push(x, x + (h - 1) * w); }
+  for (let y = 0; y < h; y++) { stack.push(y * w, y * w + w - 1); }
+  while (stack.length) {
+    const p = stack.pop();
+    if (visited[p]) continue;
+    visited[p] = 1;
+    const i = p * 4;
+    if (!isBg(i)) continue;
+    d[i + 3] = 0;
+    const x = p % w, y = (p / w) | 0;
+    if (x > 0) stack.push(p - 1);
+    if (x < w - 1) stack.push(p + 1);
+    if (y > 0) stack.push(p - w);
+    if (y < h - 1) stack.push(p + w);
+  }
+  // feather the cut edge one pixel
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = px(x, y);
+      if (d[i + 3] === 255 &&
+        (d[px(x - 1, y) + 3] === 0 || d[px(x + 1, y) + 3] === 0 ||
+         d[px(x, y - 1) + 3] === 0 || d[px(x, y + 1) + 3] === 0)) {
+        d[i + 3] = 150;
+      }
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return c;
+}
+
 function loadSprites(id) {
   SPRITES[id] = {};
   for (const p of SPRITE_POSES) {
     const img = new Image();
-    img.onload = () => { SPRITES[id][p] = img; };
+    img.onload = () => { SPRITES[id][p] = processSprite(img); };
     img.src = `assets/chars/${id}/${p}.png`;
   }
 }
@@ -541,6 +590,122 @@ function spriteFor(id, kind) {
   const s = SPRITES[id];
   if (!s) return null;
   return s[kind] || s.idle || null;
+}
+
+/* puppet animation: the supplied artwork IS the model — we move it like a
+   paper puppet (lunge, lean, bob, recoil) and layer strike effects on top */
+function drawSprite(ctx, ch, spr, pose) {
+  const k = pose.kind || 'idle';
+  const t = clamp(pose.t || 0, 0, 1);
+  const beat = pose.beat || 0;
+  const H = ch.sprH || 280;
+  const wid = spr.width / spr.height * H;
+  let dx = 0, dy = 0, rot = 0, sx = 1, sy = 1;
+  const float = ch.sprFloat ? -24 - Math.sin(beat * Math.PI) * 7 : 0;
+  let ext = 0, kext = 0, rec = 0;
+  if (k === 'idle' || k === 'gunidle' || k === 'win') {
+    dy = -Math.abs(Math.sin(beat * Math.PI)) * 5;
+    rot = Math.sin(beat * Math.PI / 2) * 0.02;
+    sy = 1 + Math.sin(beat * TAU) * 0.007;
+  }
+  if (k === 'punch') {
+    ext = t < 0.34 ? easeOut(t / 0.34) : 1 - (t - 0.34) / 0.66 * 0.75;
+    dx = ext * 34; rot = ext * 0.09; sx = 1 + ext * 0.05;
+  }
+  if (k === 'kick') {
+    kext = t < 0.36 ? easeOut(t / 0.36) : 1 - (t - 0.36) / 0.64 * 0.7;
+    dx = kext * 26; rot = -kext * 0.07;
+  }
+  if (k === 'hit') { const ht = Math.sin(t * Math.PI); dx = -ht * 22; rot = -ht * 0.12; }
+  if (k === 'gunidle') rot -= 0.03;
+  if (k === 'shoot') { rec = 1 - t; rot = -0.03 - rec * 0.05; dx = -rec * 6; }
+  if (k === 'draw') { rot = -0.06 * (1 - t); dx = -10 * (1 - t); }
+  if (k === 'win') dy -= 4;
+
+  // soft glow under a floating character
+  if (ch.sprFloat) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const gg = ctx.createRadialGradient(0, -4, 2, 0, -4, wid * 0.45);
+    gg.addColorStop(0, 'rgba(255,230,150,0.4)');
+    gg.addColorStop(1, 'rgba(255,230,150,0)');
+    ctx.fillStyle = gg;
+    ctx.beginPath(); ctx.ellipse(0, -4, wid * 0.45, 11, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.translate(dx, dy + float);
+  ctx.rotate(rot);
+  ctx.scale(sx, sy);
+  ctx.drawImage(spr, -wid / 2, -H, wid, H);
+  ctx.restore();
+
+  // anime slash crescent + speedlines on strikes
+  if ((k === 'punch' && ext > 0.55) || (k === 'kick' && kext > 0.55)) {
+    const e = Math.max(ext, kext);
+    const ey = k === 'kick' ? -H * 0.38 : -H * 0.6;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = `rgba(255,255,255,${0.85 * e})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(dx + wid * 0.1, ey, wid * 0.66, -0.65, 0.65); ctx.stroke();
+    ctx.strokeStyle = `rgba(150,225,255,${0.65 * e})`;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(dx + wid * 0.1, ey, wid * 0.55, -0.5, 0.5); ctx.stroke();
+    for (let i = -1; i <= 1; i++) {
+      ctx.lineWidth = i === 0 ? 3 : 1.6;
+      ctx.strokeStyle = `rgba(255,255,255,${0.5 * e})`;
+      ctx.beginPath();
+      ctx.moveTo(dx - 24, ey + i * 12);
+      ctx.lineTo(dx - 112, ey + i * 16);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // dual pistols in gun stances
+  if (k === 'gunidle' || k === 'shoot' || k === 'draw') {
+    const gt = k === 'draw' ? t : 1;
+    const gx = lerp(-wid * 0.05, wid * 0.42, gt), gy = -H * 0.56;
+    drawGun(ctx, gx, gy, (1 - gt) * 1.1 - rec * 0.32,
+      (k === 'shoot' && t < 0.35) ? 1 - t / 0.35 : 0);
+    drawGun(ctx, gx - 15, gy + 15, (1 - gt) * 1.1 - rec * 0.2, 0);
+  }
+  // rising charge aura during the ultimate draw
+  if (k === 'draw') {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 7; i++) {
+      const ax = -wid / 2 + ((i * 41 + t * 230) % Math.max(wid, 1));
+      ctx.strokeStyle = 'rgba(120,220,255,0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ax, -14 - t * 50 - i * 9);
+      ctx.lineTo(ax, -52 - t * 95 - i * 9);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // sparkles on the win pose
+  if (k === 'win') {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + beat * 1.7;
+      const r = wid * 0.52 + Math.sin(beat * TAU + i) * 9;
+      const sxp = Math.cos(a) * r, syp = -H * 0.52 + Math.sin(a) * H * 0.38;
+      ctx.fillStyle = `rgba(255,240,180,${0.45 + 0.4 * Math.sin(beat * TAU * 2 + i)})`;
+      ctx.beginPath();
+      for (let j = 0; j < 8; j++) {
+        const aa = j * TAU / 8;
+        const rr2 = j % 2 ? 1.7 : 5.2;
+        ctx.lineTo(sxp + Math.cos(aa) * rr2, syp + Math.sin(aa) * rr2);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 /* dual pistol, pointing +x from (x,y) */
@@ -1189,13 +1354,10 @@ function sagaSneaker(ctx, x, y, ang, far) {
    pose: {kind:'idle'|'punch'|'hit'|'win', t:0..1, beat, aim} */
 function drawFighter(ctx, idx, pose) {
   const ch = CHARS[idx];
-  // player-supplied sprite override
+  // player-supplied artwork: animate it as a puppet
   const spr = spriteFor(ch.id, pose.kind || 'idle');
   if (spr) {
-    const hgt = 280 * ch.h;
-    const wid = spr.width / spr.height * hgt;
-    const sBob = (pose.kind === 'idle' || !pose.kind) ? -Math.abs(Math.sin((pose.beat || 0) * Math.PI)) * 4 : 0;
-    ctx.drawImage(spr, -wid / 2, -hgt + sBob, wid, hgt);
+    drawSprite(ctx, ch, spr, pose);
     return;
   }
   if (ch.id === 'saga') {
@@ -2064,6 +2226,11 @@ function resetCache() { wallCache = null; signCache = null; wallHue = -1; signHu
 // try to load sprite overrides for every fighter (404s are silently ignored)
 CHARS.forEach(c => loadSprites(c.id));
 
-return { CHARS, drawFighter, drawEnemy, drawKeyBadge, drawBG, drawPortrait, vignette, resetCache, FLOOR_Y, rr, lerp, clamp, easeOut };
+return {
+  CHARS, drawFighter, drawEnemy, drawKeyBadge, drawBG, drawPortrait, vignette,
+  resetCache, FLOOR_Y, rr, lerp, clamp, easeOut,
+  getSprite: (id, kind) => spriteFor(id, kind),
+  hasSprite: id => !!(SPRITES[id] && (SPRITES[id].portrait || SPRITES[id].idle))
+};
 
 })();

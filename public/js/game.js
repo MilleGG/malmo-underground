@@ -443,7 +443,55 @@ function renderChar() {
     ctx.stroke();
     ctx.shadowBlur = 0;
     const cx = p[0] + p[2] / 2;
-    if (c.portrait) {
+    const art = MUArt.getSprite(c.id, 'portrait');
+    if (art) {
+      // the player's artwork, framed with effects
+      const beat = menuBeat() + i * 0.5;
+      const pulse = Math.max(0, 1 - (beat - Math.floor(beat)) * 2.5);
+      const ah = 332, aw = Math.min(p[2] - 36, art.width / art.height * ah);
+      const ihh = aw / (art.width / art.height);
+      const iy = p[1] + 44, ix = cx - aw / 2;
+      ctx.save();
+      MUArt.rr(ctx, p[0] + 4, p[1] + 4, p[2] - 8, p[3] - 8, 15);
+      ctx.clip();
+      // pulsing aura behind the figure
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const ag = ctx.createRadialGradient(cx, iy + ihh * 0.55, 20, cx, iy + ihh * 0.55, aw * 0.95);
+      ag.addColorStop(0, c.theme + (sel ? '55' : '2e'));
+      ag.addColorStop(1, c.theme + '00');
+      ctx.fillStyle = ag;
+      ctx.fillRect(p[0], p[1], p[2], p[3]);
+      ctx.restore();
+      // glow silhouette + artwork
+      ctx.save();
+      if (sel) { ctx.translate(0, Math.sin(S.t * 2.2) * 3); }
+      ctx.shadowColor = c.theme;
+      ctx.shadowBlur = sel ? 26 + pulse * 14 : 12;
+      ctx.drawImage(art, ix, iy, aw, ihh);
+      ctx.restore();
+      // holo sweep
+      const sweep = ((S.t * 90 + i * 130) % (p[3] + 240)) - 120;
+      const hg = ctx.createLinearGradient(0, p[1] + sweep - 40, 0, p[1] + sweep + 40);
+      hg.addColorStop(0, 'rgba(255,255,255,0)');
+      hg.addColorStop(0.5, sel ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.05)');
+      hg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hg;
+      ctx.fillRect(p[0], p[1] + sweep - 40, p[2], 80);
+      // floating sparkles
+      if (sel) {
+        ctx.globalCompositeOperation = 'lighter';
+        for (let sp = 0; sp < 5; sp++) {
+          const a = sp * 2.4 + S.t * 1.3;
+          const sxp = cx + Math.cos(a) * (aw * 0.55);
+          const syp = iy + ihh * 0.5 + Math.sin(a * 1.4) * (ihh * 0.45);
+          ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.35 * Math.sin(S.t * 4 + sp)})`;
+          ctx.beginPath(); ctx.arc(sxp, syp, 1.8, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      ctx.restore();
+    } else if (c.portrait) {
       // static anime portrait
       ctx.save();
       ctx.translate(cx, p[1] + 185);
