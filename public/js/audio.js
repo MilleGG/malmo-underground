@@ -1,4 +1,4 @@
-/* MALMÖ UNDERGROUND — audio engine.
+/* MALMÖ UNDERGROUND — audio engine v2.
    All music is synthesized live via Web Audio (no audio files).
    Tracks are pattern-sequenced on a 16th-note grid; gameplay notes are
    authored on the same grid so every punch lands on the music. */
@@ -9,10 +9,10 @@ const MUAudio = (() => {
 let ctx = null, busM = null, busS = null, master = null, comp = null;
 let delayNode = null, dSend = null;
 let noiseBuf = null;
-let cur = null;        // currently playing track object
+let cur = null;
 let events = [], evPtr = 0, startAt = 0, schedTimer = null;
 let playing = false;
-let volume = 0.85, muted = false;
+let volume = 0.9, muted = false;
 
 function ensure() {
   if (ctx) return;
@@ -20,18 +20,17 @@ function ensure() {
   master = ctx.createGain();
   master.gain.value = muted ? 0 : volume;
   comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -14; comp.knee.value = 18; comp.ratio.value = 5;
+  comp.threshold.value = -13; comp.knee.value = 18; comp.ratio.value = 5;
   comp.attack.value = 0.004; comp.release.value = 0.16;
   busM = ctx.createGain(); busM.gain.value = 1;
   busS = ctx.createGain(); busS.gain.value = 1;
   busM.connect(master); busS.connect(master);
   master.connect(comp); comp.connect(ctx.destination);
-  // feedback delay for leads/plucks
   delayNode = ctx.createDelay(2.0);
   delayNode.delayTime.value = 0.36;
-  const fb = ctx.createGain(); fb.gain.value = 0.32;
-  const tame = ctx.createBiquadFilter(); tame.type = 'lowpass'; tame.frequency.value = 3000;
-  const wet = ctx.createGain(); wet.gain.value = 0.32;
+  const fb = ctx.createGain(); fb.gain.value = 0.34;
+  const tame = ctx.createBiquadFilter(); tame.type = 'lowpass'; tame.frequency.value = 3200;
+  const wet = ctx.createGain(); wet.gain.value = 0.34;
   dSend = ctx.createGain(); dSend.gain.value = 1;
   dSend.connect(delayNode);
   delayNode.connect(tame); tame.connect(fb); fb.connect(delayNode);
@@ -42,14 +41,14 @@ function unlock() { ensure(); if (ctx.state !== 'running') ctx.resume(); }
 
 function getNoise() {
   if (!noiseBuf) {
-    noiseBuf = ctx.createBuffer(1, (ctx.sampleRate * 1.2) | 0, ctx.sampleRate);
+    noiseBuf = ctx.createBuffer(1, (ctx.sampleRate * 1.5) | 0, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   }
   return noiseBuf;
 }
 
-/* ---------- instruments (scheduled at absolute ctx time t) ---------- */
+/* ---------- instruments ---------- */
 
 function noiseHit(t, dur, freq, type, vol, q, dest) {
   const s = ctx.createBufferSource(); s.buffer = getNoise(); s.loop = true;
@@ -67,7 +66,7 @@ function tone(t, f, d, type, v, dest) {
   const g = ctx.createGain();
   g.gain.setValueAtTime(v, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + d);
-  o.connect(g); g.connect(dest || busM);
+  o.connect(g); g.connect(dest || busS);
   o.start(t); o.stop(t + d + 0.03);
 }
 
@@ -83,23 +82,32 @@ function distCurve() {
 
 function kick(t, o) {
   o = o || {};
-  const v = o.gain || 1.0, d = o.decay || 0.26;
+  const v = o.gain || 1.0, d = o.decay || 0.27;
+  // pitch-drop body
   const osc = ctx.createOscillator(); osc.type = 'sine';
-  osc.frequency.setValueAtTime(o.drop || 150, t);
+  osc.frequency.setValueAtTime(o.drop || 155, t);
   osc.frequency.exponentialRampToValueAtTime(o.tail || 44, t + 0.085);
   const g = ctx.createGain();
   g.gain.setValueAtTime(v, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + d);
   osc.connect(g); g.connect(busM);
   osc.start(t); osc.stop(t + d + 0.02);
-  noiseHit(t, 0.012, 4200, 'highpass', 0.45 * v);
+  // sub layer
+  const sub = ctx.createOscillator(); sub.type = 'sine'; sub.frequency.value = o.sub || 52;
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(v * 0.5, t);
+  sg.gain.exponentialRampToValueAtTime(0.001, t + d * 1.1);
+  sub.connect(sg); sg.connect(busM);
+  sub.start(t); sub.stop(t + d * 1.1 + 0.02);
+  // click
+  noiseHit(t, 0.014, 4500, 'highpass', 0.5 * v);
   if (o.dist) {
     const o2 = ctx.createOscillator(); o2.type = 'square';
-    o2.frequency.setValueAtTime((o.drop || 150) * 0.9, t);
+    o2.frequency.setValueAtTime((o.drop || 155) * 0.9, t);
     o2.frequency.exponentialRampToValueAtTime(o.tail || 44, t + 0.1);
     const ws = ctx.createWaveShaper(); ws.curve = distCurve();
     const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.4 * v, t);
+    g2.gain.setValueAtTime(0.42 * v, t);
     g2.gain.exponentialRampToValueAtTime(0.001, t + d * 0.85);
     o2.connect(ws); ws.connect(g2); g2.connect(busM);
     o2.start(t); o2.stop(t + d);
@@ -107,19 +115,28 @@ function kick(t, o) {
 }
 
 function clap(t, vol) {
-  vol = vol || 0.55;
+  vol = vol || 0.5;
   for (let i = 0; i < 3; i++) noiseHit(t + i * 0.011, 0.024, 1500, 'bandpass', vol * 0.5, 1.4);
-  noiseHit(t + 0.03, 0.2, 1700, 'bandpass', vol, 1.1);
+  noiseHit(t + 0.03, 0.22, 1700, 'bandpass', vol, 1.1);
 }
 
 function hat(t, open, vol) {
-  noiseHit(t, open ? 0.22 : 0.045, 8500, 'highpass', vol || 0.22);
+  noiseHit(t, open ? 0.24 : 0.045, 8500, 'highpass', vol || 0.2);
+}
+
+function shaker(t, acc) {
+  noiseHit(t, acc ? 0.07 : 0.035, 6200, 'bandpass', acc ? 0.13 : 0.07, 1.6);
 }
 
 function snare(t, vol) {
   vol = vol || 0.6;
-  noiseHit(t, 0.15, 1900, 'bandpass', vol, 0.8);
-  tone(t, 200, 0.1, 'triangle', vol * 0.6);
+  noiseHit(t, 0.16, 1900, 'bandpass', vol, 0.8);
+  tone(t, 195, 0.1, 'triangle', vol * 0.6, busM);
+}
+
+function crash(t, vol) {
+  noiseHit(t, 1.3, 5800, 'highpass', vol || 0.22, 0.6);
+  noiseHit(t, 0.5, 3000, 'bandpass', (vol || 0.22) * 0.6, 0.8);
 }
 
 function bass(t, f, len, o) {
@@ -139,7 +156,7 @@ function bass(t, f, len, o) {
   g.gain.exponentialRampToValueAtTime(0.001, t + len);
   osc.connect(flt); flt.connect(g); g.connect(busM);
   osc.start(t); osc.stop(t + len + 0.04);
-  if (o.sub) {
+  if (o.subOsc) {
     const s = ctx.createOscillator(); s.type = 'sine'; s.frequency.value = f / 2;
     const g2 = ctx.createGain();
     g2.gain.setValueAtTime(v * 0.7, t);
@@ -151,24 +168,26 @@ function bass(t, f, len, o) {
 
 function lead(t, f, len, o) {
   o = o || {};
-  const v = o.gain || 0.13;
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(v, t + 0.014);
-  g.gain.setValueAtTime(v, t + Math.max(0.02, len - 0.05));
-  g.gain.exponentialRampToValueAtTime(0.001, t + len + 0.06);
-  const flt = ctx.createBiquadFilter(); flt.type = 'lowpass';
-  flt.frequency.value = o.cut || 5200; flt.Q.value = 0.7;
-  g.connect(flt); flt.connect(busM);
-  const det = o.det || 14;
-  [-det, 0, det].forEach(dc => {
-    const osc = ctx.createOscillator(); osc.type = 'sawtooth';
-    osc.frequency.value = f; osc.detune.value = dc;
-    osc.connect(g); osc.start(t); osc.stop(t + len + 0.1);
-  });
-  if (o.echo) {
-    const e = ctx.createGain(); e.gain.value = o.echo;
-    flt.connect(e); e.connect(dSend);
+  const voices = o.oct ? [[f, o.gain || 0.13], [f * 2, (o.gain || 0.13) * 0.45]] : [[f, o.gain || 0.13]];
+  for (const [vf, vg] of voices) {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vg, t + 0.014);
+    g.gain.setValueAtTime(vg, t + Math.max(0.02, len - 0.05));
+    g.gain.exponentialRampToValueAtTime(0.001, t + len + 0.06);
+    const flt = ctx.createBiquadFilter(); flt.type = 'lowpass';
+    flt.frequency.value = o.cut || 5200; flt.Q.value = 0.7;
+    g.connect(flt); flt.connect(busM);
+    const det = o.det || 14;
+    [-det, 0, det].forEach(dc => {
+      const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+      osc.frequency.value = vf; osc.detune.value = dc;
+      osc.connect(g); osc.start(t); osc.stop(t + len + 0.1);
+    });
+    if (o.echo) {
+      const e = ctx.createGain(); e.gain.value = o.echo;
+      flt.connect(e); e.connect(dSend);
+    }
   }
 }
 
@@ -177,30 +196,72 @@ function pluck(t, f, len, o) {
   const v = o.gain || 0.12;
   const osc = ctx.createOscillator(); osc.type = o.type || 'square'; osc.frequency.value = f;
   const flt = ctx.createBiquadFilter(); flt.type = 'lowpass'; flt.Q.value = 1;
-  flt.frequency.setValueAtTime(4200, t);
+  flt.frequency.setValueAtTime(o.cut || 4200, t);
   flt.frequency.exponentialRampToValueAtTime(700, t + len);
   const g = ctx.createGain();
   g.gain.setValueAtTime(v, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + len);
   osc.connect(flt); flt.connect(g); g.connect(busM);
-  const e = ctx.createGain(); e.gain.value = 0.5;
+  const e = ctx.createGain(); e.gain.value = o.echo === undefined ? 0.5 : o.echo;
   g.connect(e); e.connect(dSend);
   osc.start(t); osc.stop(t + len + 0.04);
 }
 
+function bell(t, f, len, o) {
+  o = o || {};
+  const v = o.gain || 0.1;
+  [[1, 1], [2.01, 0.4], [2.99, 0.15]].forEach(([m, pv]) => {
+    const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = f * m;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(v * pv, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + len);
+    osc.connect(g); g.connect(busM);
+    const e = ctx.createGain(); e.gain.value = 0.6;
+    g.connect(e); e.connect(dSend);
+    osc.start(t); osc.stop(t + len + 0.05);
+  });
+}
+
+function stab(t, fs, len, o) {
+  o = o || {};
+  const g = ctx.createGain();
+  const v = o.gain || 0.07;
+  g.gain.setValueAtTime(v, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  const flt = ctx.createBiquadFilter(); flt.type = 'highpass'; flt.frequency.value = 280;
+  g.connect(flt); flt.connect(busM);
+  const e = ctx.createGain(); e.gain.value = 0.7;
+  flt.connect(e); e.connect(dSend);
+  fs.forEach(f => {
+    [-9, 9].forEach(dc => {
+      const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+      osc.frequency.value = f; osc.detune.value = dc;
+      osc.connect(g); osc.start(t); osc.stop(t + len + 0.05);
+    });
+  });
+}
+
+/* pad with optional sidechain-style pump (gain ducks on every beat) */
 function pad(t, fs, len, o) {
   o = o || {};
-  const atk = Math.min(0.5, len * 0.25);
+  const atk = o.pump ? 0.05 : Math.min(0.5, len * 0.25);
+  const v = o.gain || 0.034;
   fs.forEach(f => {
     [-7, 7].forEach(dc => {
       const osc = ctx.createOscillator(); osc.type = 'sawtooth';
       osc.frequency.value = f; osc.detune.value = dc;
-      const flt = ctx.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 1300;
+      const flt = ctx.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = o.cut || 1400;
       const g = ctx.createGain();
-      const v = o.gain || 0.035;
       g.gain.setValueAtTime(0, t);
       g.gain.linearRampToValueAtTime(v, t + atk);
-      g.gain.setValueAtTime(v, t + len * 0.8);
+      if (o.pump && o.spb) {
+        for (let bt = o.spb; bt < len - 0.05; bt += o.spb) {
+          g.gain.setValueAtTime(v, t + bt - 0.001);
+          g.gain.linearRampToValueAtTime(v * 0.3, t + bt + 0.02);
+          g.gain.linearRampToValueAtTime(v, t + bt + o.spb * 0.55);
+        }
+      }
+      g.gain.setValueAtTime(v, t + len * 0.85);
       g.gain.linearRampToValueAtTime(0, t + len);
       osc.connect(flt); flt.connect(g); g.connect(busM);
       osc.start(t); osc.stop(t + len + 0.05);
@@ -215,8 +276,8 @@ function riser(t, len) {
   f.frequency.exponentialRampToValueAtTime(7000, t + len);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.001, t);
-  g.gain.exponentialRampToValueAtTime(0.3, t + len);
-  g.gain.setValueAtTime(0.3, t + len);
+  g.gain.exponentialRampToValueAtTime(0.28, t + len);
+  g.gain.setValueAtTime(0.28, t + len);
   g.gain.linearRampToValueAtTime(0, t + len + 0.05);
   s.connect(f); f.connect(g); g.connect(busM);
   s.start(t); s.stop(t + len + 0.1);
@@ -225,14 +286,16 @@ function riser(t, len) {
 function impact(t) {
   kick(t, { drop: 200, tail: 35, decay: 0.7, gain: 1.1 });
   noiseHit(t, 0.8, 500, 'lowpass', 0.5);
+  crash(t, 0.3);
 }
 
 /* ---------- track data ---------- */
-/* drum patterns: 16 chars per bar ('x' hit, 'o' open hat, '.' rest); string or per-bar array.
-   bass/lead/pluck: per-bar arrays of [step, semitone, lenSteps, accent?]; null bar = silence.
-   pad: per-bar array of semitone chords (held one bar); null = none.
-   chordSeq: per-bar semitone offset applied to bass + pad.
-   notes: per-bar gameplay chart, 16ths, chars d/f/j/k; array of strings = overlay (doubles). */
+/* drum patterns: 16 chars/bar ('x' hit, 'o' open hat, '.' rest); string or per-bar array.
+   bass/lead/pluck/arp/bellp: per-bar arrays of [step, semitone, lenSteps, accent?].
+   stabp: per-bar arrays of [step, [semis], lenSteps].
+   pad: per-bar chord arrays (explicit voicings — correct major/minor).
+   chordSeq: per-bar semitone offset applied to BASS only.
+   notes: gameplay chart, 16ths, chars d/f/j/k; array of strings = stacked doubles. */
 
 const K4 = 'x...x...x...x...';
 const CL = '....x.......x...';
@@ -240,159 +303,198 @@ const HOFF = '..x...x...x...x.';
 const HOPEN = '..o...o...o...o.';
 const H8 = 'x.x.x.x.x.x.x.x.';
 const H16 = 'xxxxxxxxxxxxxxxx';
+const SHK = 'x.xXx.xXx.xXx.xX';
 const E16 = '................';
 
 const BOCT = [[0,0,1],[2,12,1],[4,0,1],[6,12,1],[8,0,1],[10,12,1],[12,0,1],[14,12,1]];
-const B16A = [[0,0,1,1],[2,0,1],[4,12,1],[6,0,1],[8,0,1,1],[10,12,1],[12,0,1],[14,12,1]];
 
-// acid bars (track 2)
+/* --- VÄSTRA HAMNEN VICE (A minor synthwave) --- */
+// chord voicings (semis from A1)
+const vAm = [12,15,19,24], vF = [20,24,27,32], vC = [15,19,22,27], vG = [22,26,29,34];
+const VBV = [[0,0,2],[2,0,2],[4,0,2],[6,0,2],[8,0,2],[10,7,2],[12,0,2],[14,12,2]];
+const arpOf = (a,b,c,d) => [[0,a,1],[2,b,1],[4,c,1],[6,d,1],[8,c,1],[10,b,1],[12,a,1],[14,b,1]];
+const arpAm = arpOf(24,27,31,36), arpF = arpOf(20,24,27,32), arpC = arpOf(27,31,34,39), arpG = arpOf(22,26,29,34);
+const arp16Of = (a,b,c,d) => [[0,a,1],[1,b,1],[2,c,1],[3,d,1],[4,c,1],[5,b,1],[6,a,1],[7,b,1],[8,c,1],[9,d,1],[10,c,1],[11,b,1],[12,a,1],[13,b,1],[14,c,1],[15,d,1]];
+// VICE lead hook (4 bars)
+const VH1 = [[0,43,3],[4,39,3],[8,41,3],[12,43,3]];
+const VH2 = [[0,41,4],[6,39,2],[8,36,6]];
+const VH3 = [[0,43,3],[4,39,3],[8,41,3],[12,46,3]];
+const VH4 = [[0,48,6],[8,46,3],[12,43,3]];
+const VBELL = [[0,43,4],[6,48,4],[12,46,3]];
+const VBELL2 = [[0,48,4],[6,46,4],[12,43,3]];
+
+/* --- MÖLLAN MASSIV (A minor acid) --- */
 const AB1 = [[0,0,1,1],[2,0,1],[3,12,1],[4,0,1],[6,0,1],[7,12,1],[8,0,1,1],[10,15,1],[11,12,1],[12,0,1],[14,12,1],[15,0,1]];
 const AB2 = [[0,0,1,1],[2,0,1],[3,12,1],[4,0,1],[6,17,1],[7,15,1],[8,12,1,1],[10,0,1],[12,0,1],[13,12,1],[14,15,1],[15,12,1]];
-const ST  = [[2,24,1],[2,27,1],[2,31,1],[10,24,1],[10,27,1],[10,31,1]];
+const AB3 = [[0,0,1,1],[3,12,1],[4,0,1],[6,15,1],[8,0,1,1],[10,12,1],[12,17,1],[13,15,1],[14,12,1],[15,0,1]];
+const MST = [[2,[24,27,31],1],[10,[24,27,31],1]];
+const MST2 = [[2,[24,27,31],1],[6,[24,27,31],1],[10,[24,27,31],1],[14,[27,31,36],1]];
+const MH1 = [[0,36,1],[2,36,1],[4,39,2],[8,41,1],[10,43,2],[14,46,1]];
+const MH2 = [[0,48,2],[4,46,1],[6,43,1],[8,41,2],[12,39,2]];
 
-// offbeat hardstyle bass (track 3)
+/* --- TRIANGELN OVERDRIVE (F minor hard dance) --- */
 const OB = [[2,0,2,1],[6,0,2,1],[10,0,2,1],[14,0,2,1]];
-
-// track 1 lead phrases (E minor pentatonic)
-const T1LA = [[0,36,2],[2,39,1],[4,43,2],[8,46,2],[10,43,1],[12,41,2],[14,39,1]];
-const T1LB = [[0,41,2],[4,39,2],[8,36,4],[12,34,2]];
-const T1LC = [[0,41,2],[4,43,2],[8,46,4],[12,48,2]];
-
-// track 3 anthem phrases (F minor pentatonic)
 const T3A1 = [[0,36,3],[4,39,3],[8,43,4],[12,41,3]];
 const T3A2 = [[0,39,3],[4,43,3],[8,48,6]];
 const T3A3 = [[0,43,2],[2,41,1],[4,39,2],[8,36,4],[12,34,2]];
+const tFm = [12,15,19], tFm7 = [12,15,19,22], tDb = [13,17,20], tEb = [15,19,22];
 
 const MENU = {
-  name: 'LOBBY', bpm: 104, rootHz: 41.2, loop: true,
-  kit: { bass: { cut: 700, gain: 0.3, q: 2 } },
+  id: 'menu', name: 'LOBBY', bpm: 106, rootHz: 55.0, loop: true,
+  kit: { bass: { cut: 700, gain: 0.28, q: 2 }, pluck: { gain: 0.09 } },
   sections: [{
-    bars: 4, energy: 0.15,
+    bars: 8, energy: 0.15,
     hat: HOFF,
-    kick: ['................','................', K4, K4],
-    pad: [[12,19,27,34], null, [8+12,8+19,8+27], null],
-    pluck: [null, [[0,36,2],[6,39,1],[8,43,2]], null, [[0,43,2],[6,41,1],[8,39,2],[12,36,2]]],
-    notes: [E16, E16, E16, E16]
+    kick: [E16, E16, E16, E16, K4, K4, K4, K4],
+    pad: [vAm, vAm, vF, vF, vC, vC, vG, vG],
+    bass: [null, null, null, null, VBV, VBV, VBV, VBV],
+    chordSeq: [0,0,8,8,3,3,10,10],
+    bellp: [null, VBELL, null, VBELL2, null, VBELL, null, VBELL2],
+    notes: [E16]
   }]
 };
 
 const TRACKS = [
   {
-    id: 'neon', name: 'NEON TUNNELBANA', sub: 'deep rave · 124 BPM',
-    bpm: 124, rootHz: 41.2, hue: 195, approach: 1.9, stars: 1,
+    id: 'vice', name: 'VÄSTRA HAMNEN VICE', sub: 'neon synthwave · 108 BPM',
+    bpm: 108, rootHz: 55.0, hue: 190, approach: 2.1, stars: 1,
     kit: {
-      kick: { drop: 150, tail: 44, decay: 0.27 },
-      bass: { cut: 1100, q: 3, gain: 0.4, sub: true },
-      lead: { gain: 0.12, cut: 4800, echo: 0.35 }
+      kick: { drop: 145, tail: 46, decay: 0.3, sub: 48 },
+      bass: { cut: 900, q: 2, gain: 0.4, subOsc: true },
+      lead: { gain: 0.13, cut: 4600, echo: 0.4, det: 12, oct: true },
+      pad: { gain: 0.042, cut: 1500 },
+      pluck: { gain: 0.085, type: 'sawtooth', cut: 3200, echo: 0.55 },
+      bell: { gain: 0.11 }
     },
     sections: [
       { bars: 4, energy: 0.15, hat: HOFF,
-        pad: [[12,19,27,34]],
-        pluck: [null, null, [[0,36,2],[4,43,2],[8,39,2],[12,46,2]], [[0,36,2],[4,43,2],[8,39,2],[12,46,2]]],
-        notes: [E16, E16, 'd.......f.......', 'j.......k.......'] },
-      { bars: 8, energy: 0.4, kick: K4, hat: HOFF, clap: CL,
-        bass: [BOCT], chordSeq: [0,0,8,8,3,3,10,10],
-        pad: [[12,19,27], null],
-        notes: ['d...f...j...k...','f...j...k...j...','d...f...j...k...','k...j...f...d...',
-                'd...f...j...k.j.','f...j...k.j.f...','d...f...j...k...','d.f.j.k.j.f.d...'] },
+        pad: [vAm, vAm, vF, vG],
+        bellp: [null, null, VBELL, VBELL2],
+        notes: [E16, E16, 'd.......j.......', 'f.......k.......'] },
+      { bars: 8, energy: 0.4, kick: K4, snare: CL, hat: HOFF,
+        bass: [VBV], chordSeq: [0,0,8,8,3,3,10,10],
+        pad: [vAm, null, vF, null, vC, null, vG, null],
+        notes: ['d...f...j...k...','k...j...f...d...','d...j...f...k...','f...d...k...j...',
+                'd...f...j...k...','j...k...d...f...','f...k...f...k...','d...f...j...k...'] },
       { bars: 4, energy: 0.6, kick: K4, hat: H8,
-        clap: [CL, CL, K4, H8],
-        bass: [BOCT], chordSeq: [0,0,10,10],
+        clap: [CL, CL, K4, 'x...x...x.x.x.x.'],
+        bass: [VBV], chordSeq: [8,8,10,10],
+        pad: [vF, vF, vG, vG],
         fx: [['riser', 0, 16]],
-        notes: ['d...d...f...f...','j...j...k...k...','d.d.f.f.j.j.k.k.','d.f.j.k.........'] },
-      { bars: 8, energy: 0.9, kick: K4, hat: HOPEN, clap: CL,
-        bass: [B16A], chordSeq: [0,0,8,8,3,3,10,10],
-        lead: [T1LA, T1LB],
-        notes: ['d.f.j...k.j.f...','d...f.j.k...j.f.','j.k.f...d.f.j...',['d...f...j...k...','............d...'],
-                'k.j.f...d.f.j...','f...j.k.d...f.j.','d.f.j...k.j.f...',['d.f.j.k.........','k.......d.......']] },
-      { bars: 4, energy: 0.3, hat: CL,
-        pad: [[12,19,27,34]], chordSeq: [0,8,3,10],
-        pluck: [[[0,43,2],[6,41,1],[8,39,2],[14,36,1]]],
-        notes: ['d.......j.......','f.......k.......','d.....f.........','j.....k.........'] },
-      { bars: 8, energy: 1.0, kick: K4, hat: H16, clap: CL,
-        bass: [B16A], chordSeq: [0,0,8,8,3,3,10,10],
-        lead: [T1LA, T1LB, T1LA, T1LC],
-        notes: ['d.f.j.k.d.f.j.k.','k.j.f.d.k.j.f.d.','d.f.j...k.j.f...',['d...j...f...k...','f...........d...'],
-                'd.j.d.j.f.k.f.k.','j.f.k.d.j.f.k.d.','d.f.j.k.j.f.d...',['d.f.j.k.........','k.j.f.d.........']] },
-      { bars: 2, energy: 0.2, kick: [K4, 'x...............'],
-        pad: [[12,19,27]], notes: [E16, E16] }
+        notes: ['d...f...j...k...','k...j...f...d...','d...f...j...k...','d.f.j.k.........'] },
+      { bars: 8, energy: 0.85, kick: K4, snare: CL, hat: HOPEN, shakerp: SHK,
+        bass: [BOCT], chordSeq: [0,0,8,8,3,3,10,10],
+        pad: [vAm, vAm, vF, vF, vC, vC, vG, vG], padPump: true,
+        lead: [VH1, VH2, VH3, VH4],
+        arp: [arpAm, arpAm, arpF, arpF, arpC, arpC, arpG, arpG],
+        fx: [['crash', 0, 0]],
+        notes: ['d...f...j...k...','j.....f.d.......','d...f...j...k...','k.......j...f...',
+                'f...j...k...j...','k.....j.f.......','d...f...j...k...','d.f.j.k.........'] },
+      { bars: 4, energy: 0.25, hat: HOFF,
+        pad: [vAm, vF, vC, vG],
+        bellp: [VBELL, null, VBELL2, null],
+        notes: ['d.......j.......','f.......k.......','d...f...j...k...', E16] },
+      { bars: 8, energy: 0.95, kick: K4, snare: CL, hat: HOPEN, shakerp: SHK,
+        bass: [BOCT], chordSeq: [0,0,8,8,3,3,10,10],
+        pad: [vAm, vAm, vF, vF, vC, vC, vG, vG], padPump: true,
+        lead: [VH1, VH2, VH3, VH4],
+        arp: [arp16Of(24,27,31,36), arp16Of(24,27,31,36), arp16Of(20,24,27,32), arp16Of(20,24,27,32),
+              arp16Of(27,31,34,39), arp16Of(27,31,34,39), arp16Of(22,26,29,34), arp16Of(22,26,29,34)],
+        fx: [['crash', 0, 0]],
+        notes: ['d...f...j...k...','j.f.d...j.f.d...','d...f...j...k...','k...j...f...d...',
+                'd.f.j...k.j.f...','d...f...j...k...','f.j.k...j.f.d...',['d...f...j...k...','k...............']] },
+      { bars: 2, energy: 0.15, kick: [K4, 'x...............'],
+        pad: [vAm], notes: [E16, E16] }
     ]
   },
   {
     id: 'mollan', name: 'MÖLLAN MASSIV', sub: 'acid techno · 138 BPM',
-    bpm: 138, rootHz: 55.0, hue: 315, approach: 1.75, stars: 2,
+    bpm: 138, rootHz: 55.0, hue: 315, approach: 1.85, stars: 2,
     kit: {
-      kick: { drop: 160, tail: 46, decay: 0.24 },
+      kick: { drop: 160, tail: 46, decay: 0.25, sub: 50 },
       bass: { cut: 680, q: 13, gain: 0.34, type: 'sawtooth' },
-      lead: { gain: 0.1, cut: 3600, echo: 0.3, det: 10 }
+      lead: { gain: 0.11, cut: 3000, echo: 0.35, det: 8 },
+      stab: { gain: 0.06 },
+      pad: { gain: 0.04, cut: 1300 },
+      pluck: { gain: 0.1 }
     },
     sections: [
       { bars: 4, energy: 0.2, hat: H8,
-        kick: [E16.replace(/x/g,'.'), E16, K4, K4],
+        kick: [E16, E16, K4, K4],
         bass: [null, null, AB1, AB1],
         notes: [E16, E16, 'd...j...........', 'f...k...........'] },
-      { bars: 8, energy: 0.45, kick: K4, hat: HOFF, clap: CL,
+      { bars: 8, energy: 0.45, kick: K4, hat: HOFF, clap: CL, shakerp: SHK,
         bass: [AB1, AB1, AB1, AB2],
-        notes: ['d..d....f..f....','j..j....k..k....','d..d....f..f....','j...k...j.k.f...',
-                'd..d..f.j..j..k.','f..f..d.k..k..j.','d...f...j...k...','d.f.d.f.j.k.j.k.'] },
+        stabp: [null, MST],
+        notes: ['d...d...f...f...','j...j...k...k...','d...f...d...f...','j...k...j.k.....',
+                'd...d...f...f...','j...j...k...k...','d...f...j...k...','d.f.d.f.j.k.j.k.'] },
       { bars: 4, energy: 0.65, kick: K4, hat: H8,
         snare: [CL, '....x...x...x...', H8, H16],
         bass: [AB1],
         fx: [['riser', 0, 16]],
         notes: ['d...d...f...f...','j...j...k...k...','d.f.j.k.d.f.j.k.','j.k.j.k.........'] },
-      { bars: 8, energy: 0.95, kick: K4, hat: HOPEN, clap: CL,
-        bass: [AB2, AB2, AB2, AB1], chordSeq: [0,0,0,0,8,8,0,0],
-        lead: [ST],
-        notes: ['d.j.f.k.d.j.f.k.','d.j.f.k.d.f.j.k.','k.f.j.d.k.f.j.d.',['d...f...j...k...','j...........f...'],
-                'd.d.j.j.f.f.k.k.','k.k.f.f.j.j.d.d.','d.j.f.k.d.j.f.k.',['d.f.j.k.d.f.j.k.','............k.d.']] },
+      { bars: 8, energy: 0.9, kick: K4, hat: HOPEN, clap: CL, shakerp: SHK,
+        bass: [AB2, AB2, AB3, AB1],
+        stabp: [MST, MST, MST, MST2],
+        fx: [['crash', 0, 0]],
+        notes: ['d.j.f.k.d.j.f.k.','d...j...f...k...','k.f.j.d.k.f.j.d.','d...f...j...k...',
+                'd.d.j.j.f.f.k.k.','k...f...j...d...','d.j.f.k.d.j.f.k.',['d.f.j.k.........','k...............']] },
       { bars: 4, energy: 0.25, hat: HOFF,
-        pad: [[12,15,19,24]], chordSeq: [0,0,8,8],
-        pluck: [[[0,36,1],[4,39,1],[8,43,1],[12,46,1]]],
+        pad: [vAm, vAm, vF, vF],
+        pluckp: [[[0,36,1],[4,39,1],[8,43,1],[12,46,1]]],
         notes: ['d.......f.......','j.......k.......','d...f...j...k...', E16] },
-      { bars: 8, energy: 1.0, kick: K4, hat: H8, clap: CL,
-        bass: [AB2, AB1, AB2, AB1],
-        lead: [ST],
-        notes: ['d.j.f.k.j.d.k.f.','df..jk..df..jk..','d.j.f.k.j.d.k.f.','jk..df..jk..df..',
-                'd.f.j.k.k.j.f.d.','df..jk..fd..kj..','d.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...']] },
+      { bars: 8, energy: 1.0, kick: K4, hat: H8, clap: CL, shakerp: SHK,
+        bass: [AB2, AB1, AB3, AB1],
+        lead: [MH1, MH2],
+        fx: [['crash', 0, 0]],
+        notes: ['d.j.f.k.j.d.k.f.','d...f...j...k...','df..jk..d...k...','j.k.f.d.j.k.f.d.',
+                'd...j...f...k...','df..jk..fd..kj..','d.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...']] },
       { bars: 2, energy: 0.2, kick: [K4, 'x...............'], notes: [E16, E16] }
     ]
   },
   {
     id: 'triangeln', name: 'TRIANGELN OVERDRIVE', sub: 'hard dance · 150 BPM',
-    bpm: 150, rootHz: 43.65, hue: 25, approach: 1.6, stars: 3,
+    bpm: 150, rootHz: 43.65, hue: 25, approach: 1.7, stars: 3,
     kit: {
-      kick: { drop: 170, tail: 42, decay: 0.32, dist: true },
-      bass: { cut: 1500, q: 4, gain: 0.36, sub: true },
-      lead: { gain: 0.15, cut: 6000, echo: 0.25, det: 18 }
+      kick: { drop: 170, tail: 42, decay: 0.33, dist: true, sub: 46 },
+      bass: { cut: 1500, q: 4, gain: 0.36, subOsc: true },
+      lead: { gain: 0.15, cut: 6200, echo: 0.25, det: 18, oct: true },
+      pad: { gain: 0.05, cut: 1100 },
+      pluck: { gain: 0.1, type: 'sawtooth', cut: 3600, echo: 0.55 }
     },
     sections: [
       { bars: 4, energy: 0.25, kick: K4,
-        pad: [[12,15,19]],
+        pad: [tFm],
         notes: [E16, 'd.......j.......', 'f.......k.......', 'd...f...j...k...'] },
       { bars: 8, energy: 0.55, kick: K4, hat: HOFF, clap: CL,
         bass: [OB],
+        pad: [tFm, null, tDb, null, tEb, null, tFm, null], chordless: true,
         notes: ['d...f...j...k...','d...f...j...k.j.','d.f.....j.k.....','d...j...f...k...',
                 'd.f.j.k.d...k...','f.d.k.j.f...j...','d...f.j.k...j.f.','d.f.j.k.j.f.d...'] },
       { bars: 4, energy: 0.7, kick: K4, hat: H8,
         snare: [CL, '....x...x...x...', H8, H16],
         bass: [OB],
         fx: [['riser', 0, 16]],
-        notes: ['d.d.f.f.j.j.k.k.','k.k.j.j.f.f.d.d.','d.f.j.k.d.f.j.k.','df..jk..........'] },
+        notes: ['d.d.f.f.j.j.k.k.','k.k.j.j.f.f.d.d.','d.f.j.k.d.f.j.k.','d.f.j.k.........'] },
       { bars: 8, energy: 1.0, kick: K4, hat: HOPEN,
         bass: [OB],
+        pad: [tFm7], padPump: true,
         lead: [T3A1, T3A2, T3A1, T3A3],
-        notes: ['d.f.j.k.d.f.j.k.','k.j.f.d.k.j.f.d.','d.j.d.j.f.k.f.k.',['d...f...j...k...','j...k...d...f...'],
-                'df..jk..df..jk..','kj..fd..kj..fd..','d.f.j.k.j.f.d.f.',['d.f.j.k.d.f.j.k.','........k.j.f.d.']] },
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j.k.d.f.j.k.','k...j...f...d...','d.j.d.j.f.k.f.k.',['d...f...j...k...','j...k...d...f...'],
+                'df..jk..df..jk..','k...f...j...d...','d.f.j.k.j.f.d...',['d.f.j.k.d.f.j.k.','............k...']] },
       { bars: 4, energy: 0.3, hat: HOFF,
-        pad: [[12,15,19,22]],
-        pluck: [[[0,36,1],[2,39,1],[4,43,1],[6,46,1],[8,48,1],[10,46,1],[12,43,1],[14,39,1]]],
+        pad: [tFm7],
+        pluckp: [[[0,36,1],[2,39,1],[4,43,1],[6,46,1],[8,48,1],[10,46,1],[12,43,1],[14,39,1]]],
         notes: ['d...f...j...k...','k...j...f...d...','d.f.....j.k.....', E16] },
       { bars: 8, energy: 1.0, hat: H8, clap: CL,
         kick: [K4, K4, K4, 'x...x...x..xx...'],
         bass: [OB],
+        pad: [tFm7], padPump: true,
         lead: [T3A1, T3A2],
-        notes: ['d.f.j.k.d.f.j.k.','df..jk..df..jk..','k.j.f.d.k.j.f.d.','jk..df..jk..df..',
-                'd.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...'],'df..jk..kj..fd..','dfjk....dfjk....'] },
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j.k.d.f.j.k.','df..jk..df..jk..','k...j...f...d...','jk..df..jk..df..',
+                'd.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...'],'d.f.j.k.j.f.d...','dfjk....dfjk....'] },
       { bars: 2, energy: 0.2, kick: [K4, 'x...............'],
         fx: [['impact', 0, 0]], notes: [E16, E16] }
     ]
@@ -413,25 +515,29 @@ function buildEvents(tr) {
     for (let b = 0; b < sec.bars; b++) {
       const base = (bar + b) * 4;
       const chord = sec.chordSeq ? sec.chordSeq[b % sec.chordSeq.length] : 0;
-      const kp = barPat(sec.kick, b);
-      if (kp) for (let s = 0; s < 16; s++) if (kp[s] === 'x') ev.push({ b: base + s / 4, f: 'kick' });
-      const cp = barPat(sec.clap, b);
-      if (cp) for (let s = 0; s < 16; s++) if (cp[s] === 'x') ev.push({ b: base + s / 4, f: 'clap' });
-      const sp = barPat(sec.snare, b);
-      if (sp) for (let s = 0; s < 16; s++) if (sp[s] === 'x') ev.push({ b: base + s / 4, f: 'snare' });
-      const hp = barPat(sec.hat, b);
-      if (hp) for (let s = 0; s < 16; s++) {
-        if (hp[s] === 'x') ev.push({ b: base + s / 4, f: 'hat', open: false });
-        else if (hp[s] === 'o') ev.push({ b: base + s / 4, f: 'hat', open: true });
-      }
-      const bb = sec.bass ? sec.bass[b % sec.bass.length] : null;
-      if (bb) for (const e of bb) ev.push({ b: base + e[0] / 4, f: 'bass', semi: e[1] + chord, len: e[2], acc: !!e[3] });
-      const lb = sec.lead ? sec.lead[b % sec.lead.length] : null;
-      if (lb) for (const e of lb) ev.push({ b: base + e[0] / 4, f: 'lead', semi: e[1], len: e[2] });
-      const pb = sec.pluck ? sec.pluck[b % sec.pluck.length] : null;
-      if (pb) for (const e of pb) ev.push({ b: base + e[0] / 4, f: 'pluck', semi: e[1], len: e[2] });
+      const drum = (pat, f) => {
+        const p = barPat(pat, b);
+        if (!p) return;
+        for (let s = 0; s < 16; s++) {
+          if (p[s] === 'x') ev.push({ b: base + s / 4, f });
+          else if (p[s] === 'o' && f === 'hat') ev.push({ b: base + s / 4, f, open: true });
+          else if (p[s] === 'X' && f === 'shaker') ev.push({ b: base + s / 4, f, acc: true });
+          else if (p[s] === 'x' && f === 'shaker') ev.push({ b: base + s / 4, f });
+        }
+      };
+      drum(sec.kick, 'kick'); drum(sec.clap, 'clap'); drum(sec.snare, 'snare');
+      drum(sec.hat, 'hat'); drum(sec.shakerp, 'shaker');
+      const mel = (pat, f) => {
+        const p = pat ? pat[b % pat.length] : null;
+        if (!p) return;
+        for (const e of p) ev.push({ b: base + e[0] / 4, f, semi: e[1] + (f === 'bass' ? chord : 0), len: e[2], acc: !!e[3] });
+      };
+      mel(sec.bass, 'bass'); mel(sec.lead, 'lead'); mel(sec.pluckp, 'pluck');
+      mel(sec.arp, 'arp'); mel(sec.bellp, 'bell');
+      const st = sec.stabp ? sec.stabp[b % sec.stabp.length] : null;
+      if (st) for (const e of st) ev.push({ b: base + e[0] / 4, f: 'stab', semis: e[1], len: e[2] });
       const pd = sec.pad ? sec.pad[b % sec.pad.length] : null;
-      if (pd) ev.push({ b: base, f: 'pad', semis: pd.map(s => s + chord), len: 16 });
+      if (pd) ev.push({ b: base, f: 'pad', semis: pd, len: 16, pump: !!sec.padPump });
       if (sec.fx && b === 0) for (const fx of sec.fx) ev.push({ b: base + fx[1], f: fx[0], len: fx[2] });
     }
     bar += sec.bars;
@@ -453,8 +559,7 @@ function buildNotes(i) {
       if (typeof pats === 'string') pats = [pats];
       for (const pat of pats) {
         for (let s = 0; s < 16; s++) {
-          const c = pat[s];
-          const lane = 'dfjk'.indexOf(c);
+          const lane = 'dfjk'.indexOf(pat[s]);
           if (lane >= 0) {
             const beat = base + s / 4;
             notes.push({ beat, time: beat * spb, lane });
@@ -477,7 +582,7 @@ function trackInfo(i) {
     return o;
   });
   return {
-    name: tr.name, sub: tr.sub, bpm: tr.bpm, hue: tr.hue,
+    id: tr.id, name: tr.name, sub: tr.sub, bpm: tr.bpm, hue: tr.hue,
     approach: tr.approach, stars: tr.stars,
     duration: bars * 4 * 60 / tr.bpm, sections: secs
   };
@@ -493,10 +598,14 @@ function fire(e, t, tr) {
     case 'clap': clap(t); break;
     case 'snare': snare(t); break;
     case 'hat': hat(t, e.open); break;
+    case 'shaker': shaker(t, e.acc); break;
+    case 'crash': crash(t); break;
     case 'bass': bass(t, hz(e.semi), e.len * spb / 4 * 0.95, Object.assign({ acc: e.acc }, kit.bass)); break;
     case 'lead': lead(t, hz(e.semi), e.len * spb / 4 * 0.95, kit.lead); break;
-    case 'pluck': pluck(t, hz(e.semi), Math.max(0.25, e.len * spb / 4) , kit.pluck); break;
-    case 'pad': pad(t, e.semis.map(hz), e.len * spb / 4, kit.pad); break;
+    case 'pluck': case 'arp': pluck(t, hz(e.semi), Math.max(0.22, e.len * spb / 4), kit.pluck); break;
+    case 'bell': bell(t, hz(e.semi), Math.max(0.5, e.len * spb / 4), kit.bell); break;
+    case 'stab': stab(t, e.semis.map(hz), Math.max(0.18, e.len * spb / 4), kit.stab); break;
+    case 'pad': pad(t, e.semis.map(hz), e.len * spb / 4, Object.assign({ pump: e.pump, spb }, kit.pad)); break;
     case 'riser': riser(t, e.len * spb); break;
     case 'impact': impact(t); break;
   }
@@ -562,11 +671,11 @@ function sfx(name) {
   switch (name) {
     case 'punch':
       noiseHit(t, 0.07, 1100, 'bandpass', 0.8, 0.8, busS);
-      tone(t, 84, 0.09, 'sine', 0.9, busS);
+      tone(t, 84, 0.09, 'sine', 0.9);
       break;
     case 'punchPerfect':
       noiseHit(t, 0.06, 1400, 'bandpass', 0.85, 0.8, busS);
-      tone(t, 90, 0.1, 'sine', 1.0, busS);
+      tone(t, 90, 0.1, 'sine', 1.0);
       noiseHit(t, 0.03, 5200, 'highpass', 0.4, 1, busS);
       break;
     case 'whiff':
@@ -583,17 +692,17 @@ function sfx(name) {
       noiseHit(t, 0.12, 700, 'lowpass', 0.3, 1, busS);
       break;
     }
-    case 'uiMove': tone(t, 520, 0.05, 'square', 0.1, busS); break;
+    case 'uiMove': tone(t, 520, 0.05, 'square', 0.1); break;
     case 'uiSel':
-      tone(t, 660, 0.07, 'square', 0.12, busS);
-      tone(t + 0.07, 880, 0.11, 'square', 0.12, busS);
+      tone(t, 660, 0.07, 'square', 0.12);
+      tone(t + 0.07, 880, 0.11, 'square', 0.12);
       break;
-    case 'uiBack': tone(t, 392, 0.09, 'square', 0.1, busS); break;
+    case 'uiBack': tone(t, 392, 0.09, 'square', 0.1); break;
     case 'win':
-      [523, 659, 784, 1047].forEach((f, i) => tone(t + i * 0.09, f, 0.22, 'square', 0.12, busS));
+      [523, 659, 784, 1047].forEach((f, i) => tone(t + i * 0.09, f, 0.22, 'square', 0.12));
       break;
     case 'lose':
-      [330, 277, 220, 165].forEach((f, i) => tone(t + i * 0.14, f, 0.3, 'sawtooth', 0.14, busS));
+      [330, 277, 220, 165].forEach((f, i) => tone(t + i * 0.14, f, 0.3, 'sawtooth', 0.14));
       break;
   }
 }

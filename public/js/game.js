@@ -1,5 +1,7 @@
-/* MALMÖ UNDERGROUND — game core.
-   Enemies rush in on four rows carrying D/F/J/K badges; punch them on the beat. */
+/* MALMÖ UNDERGROUND — game core v2.
+   Enemies rush in on four rows carrying D/F/J/K badges; punch them on the beat.
+   Timing readability: approach rings close on the badge exactly at the hit
+   moment, and a strike zone pulses on the beat at the impact line. */
 'use strict';
 
 (() => {
@@ -11,8 +13,8 @@ const LANE_COL = ['#3ee6ff', '#ff4fd8', '#ffd24a', '#7dff5e'];
 const ROW_Y = [398, 452, 506, 560];
 const ROW_SC = [0.8, 0.87, 0.94, 1.0];
 const PLAYER_X = 285, HIT_X = 430, SPAWN_X = 1370;
-const PERF_WIN = 0.075, GOOD_WIN = 0.15;
-const MISS_DMG = 13;
+const PERF_WIN = 0.085, GOOD_WIN = 0.18;
+const MISS_DMG = 9;
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -36,10 +38,9 @@ const S = {
   t: 0,
   selChar: 0,
   selSong: 0,
-  audioOn: false,
-  flick: 0
+  audioOn: false
 };
-let P = null; // play state
+let P = null;
 
 /* ---------------- helpers ---------------- */
 
@@ -61,7 +62,7 @@ function txt(c, str, x, y, size, col, align, font) {
   c.fillText(str, x, y);
 }
 
-function bestKey(songIdx) { return 'mu_best_' + songIdx; }
+function bestKey(songIdx) { return 'mu_best_' + MUAudio.trackInfo(songIdx).id; }
 function loadBest(songIdx) {
   try { return JSON.parse(localStorage.getItem(bestKey(songIdx))); } catch (e) { return null; }
 }
@@ -91,32 +92,32 @@ function startPlay() {
     spawnIdx: 0, active: [],
     score: 0, combo: 0, maxCombo: 0,
     hp: ch.hp, maxHp: ch.hp,
-    counts: { perfekt: 0, bra: 0, miss: 0 },
+    counts: { perfect: 0, good: 0, miss: 0 },
     row: 1, rowFrom: 1, rowT: 1,
     pose: { kind: 'idle', t0: -9 },
     parts: [], texts: [],
     shake: 0, flash: 0,
     paused: false, autoplay: false,
-    comboPop: 0, newBest: false
+    comboPop: 0, newBest: false,
+    now: -0.9 // smoothed song clock (drift-corrected toward audio clock)
   };
   MUAudio.play(songIdx);
   S.scene = 'play';
 }
 
-const POWS = ['PANG!', 'SMOCK!', 'BAM!', 'KRASCH!', 'DUNS!'];
+const POWS = ['POW!', 'WHAM!', 'SMACK!', 'BOOM!', 'CRACK!'];
 
 function judge(lane) {
   if (!P || P.paused) return;
   const now = MUAudio.time();
   const ch = CHARS[P.charIdx];
   const win = GOOD_WIN * ch.winMult;
-  let best = null, bd = 1e9;
+  let best = null, bd = 1e9, bdSigned = 0;
   for (const n of P.active) {
     if (n.state !== 'wait' || n.lane !== lane) continue;
     const d = Math.abs(n.time - now);
-    if (d < bd) { bd = d; best = n; }
+    if (d < bd) { bd = d; bdSigned = n.time - now; best = n; }
   }
-  // punch animation regardless
   P.pose = { kind: 'punch', t0: S.t };
   if (P.rowT >= 1) { P.rowFrom = P.row; }
   P.row = lane; P.rowT = 0;
@@ -136,13 +137,20 @@ function judge(lane) {
   P.comboPop = 1;
   const mult = 1 + Math.min(P.combo, 100) * 0.02;
   P.score += Math.round((perfect ? 300 : 120) * mult * ch.scoreMult);
-  P.hp = Math.min(P.maxHp, P.hp + 0.4);
-  if (perfect) P.counts.perfekt++; else P.counts.bra++;
+  P.hp = Math.min(P.maxHp, P.hp + 0.8);
+  if (perfect) P.counts.perfect++; else P.counts.good++;
   const ry = ROW_Y[lane];
   P.texts.push({
     x: HIT_X + 50, y: ry - 195, t0: S.t, size: perfect ? 30 : 24,
-    str: perfect ? 'PERFEKT' : 'BRA', col: perfect ? '#ffd24a' : '#3ee6ff', rot: 0
+    str: perfect ? 'PERFECT!' : 'GOOD', col: perfect ? '#ffd24a' : '#3ee6ff', rot: 0
   });
+  if (!perfect) {
+    // early/late micro-feedback teaches the timing
+    P.texts.push({
+      x: HIT_X + 50, y: ry - 165, t0: S.t, size: 14,
+      str: bdSigned > 0 ? 'EARLY' : 'LATE', col: 'rgba(255,255,255,0.75)', rot: 0
+    });
+  }
   if (perfect && Math.random() < 0.55) {
     P.texts.push({
       x: HIT_X + 90 + Math.random() * 60, y: ry - 120, t0: S.t, size: 40,
@@ -176,7 +184,7 @@ function finishSong() {
   MUAudio.stop();
   MUAudio.sfx('win');
   const total = P.notes.length;
-  const acc = total ? (P.counts.perfekt + 0.55 * P.counts.bra) / total : 0;
+  const acc = total ? (P.counts.perfect + 0.55 * P.counts.good) / total : 0;
   const rank = (P.counts.miss === 0 && acc >= 0.96) ? 'S'
     : acc >= 0.92 ? 'A' : acc >= 0.84 ? 'B' : acc >= 0.7 ? 'C' : 'D';
   P.acc = acc; P.rank = rank;
@@ -199,9 +207,14 @@ function gameOver() {
 function update(dt) {
   S.t += dt;
   if (S.scene !== 'play' || !P || P.paused) return;
-  const now = MUAudio.time();
+  const audioNow = MUAudio.time();
+  // smooth clock: advance by frame dt, gently steered toward the audio clock
+  P.now += dt;
+  const drift = audioNow - P.now;
+  if (Math.abs(drift) > 0.1) P.now = audioNow;
+  else P.now += drift * 0.08;
+  const now = audioNow; // judging always uses the raw audio clock
 
-  // autoplay (debug / demo)
   if (P.autoplay) {
     for (const n of P.active) {
       if (n.state === 'wait' && now >= n.time - 0.004) judge(n.lane);
@@ -233,7 +246,7 @@ function update(dt) {
   }
   P.active = P.active.filter(n => {
     if (n.state === 'dying') return n.py < 600 && n.px < 1600;
-    if (n.state === 'passed') return xFor(n, now) > -180;
+    if (n.state === 'passed') return xFor(n, P.now) > -180;
     return true;
   });
 
@@ -287,20 +300,19 @@ function menuBeat() {
 
 function renderTitle() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.45, hue: 265, flash: 0 });
-  // the three fighters at the bottom
-  [[480, 0], [640, 1], [800, 2]].forEach(([x, i]) => {
+  [[470, 0], [640, 1], [810, 2]].forEach(([x, i]) => {
     ctx.save();
     ctx.translate(x, 668);
-    ctx.scale(0.78, 0.78);
+    ctx.scale(0.74, 0.74);
     drawFighter(ctx, i, { kind: 'idle', beat: menuBeat() + i * 0.33 });
     ctx.restore();
   });
   const hueShift = (S.t * 40) % 360;
   neon(ctx, 'MALMÖ', W / 2, 220, 116, `hsl(${265 + Math.sin(S.t) * 20}, 100%, 65%)`, 30);
   neon(ctx, 'UNDERGROUND', W / 2, 295, 56, `hsl(${(hueShift + 180) % 360}, 100%, 60%)`, 24);
-  txt(ctx, 'SLÅSS I TAKTEN', W / 2, 345, 22, 'rgba(255,255,255,0.75)');
-  if (Math.sin(S.t * 4) > -0.3) txt(ctx, '— TRYCK ENTER ELLER KLICKA —', W / 2, 430, 24, '#fff');
-  txt(ctx, 'D  F  J  K  =  SLAG       M = LJUD AV/PÅ', W / 2, 470, 15, 'rgba(255,255,255,0.45)');
+  txt(ctx, 'FIGHT TO THE BEAT', W / 2, 345, 22, 'rgba(255,255,255,0.75)');
+  if (Math.sin(S.t * 4) > -0.3) txt(ctx, '— PRESS ENTER OR CLICK —', W / 2, 430, 24, '#fff');
+  txt(ctx, 'D  F  J  K  =  STRIKE       M = MUTE', W / 2, 470, 15, 'rgba(255,255,255,0.45)');
   vignette(ctx);
 }
 
@@ -310,7 +322,7 @@ function renderChar() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.4, hue: 265, flash: 0 });
   ctx.fillStyle = 'rgba(3,2,8,0.55)';
   ctx.fillRect(0, 0, W, H);
-  neon(ctx, 'VÄLJ KÄMPE', W / 2, 80, 44, '#ff4fd8', 18);
+  neon(ctx, 'CHOOSE YOUR FIGHTER', W / 2, 80, 40, '#ff4fd8', 18);
   CHAR_PANELS.forEach((p, i) => {
     const sel = i === S.selChar;
     const c = CHARS[i];
@@ -326,16 +338,16 @@ function renderChar() {
     ctx.shadowBlur = 0;
     const cx = p[0] + p[2] / 2;
     ctx.save();
-    ctx.translate(cx, p[1] + 395);
-    ctx.scale(1.08, 1.08);
+    ctx.translate(cx, p[1] + 400);
+    ctx.scale(1.06, 1.06);
     drawFighter(ctx, i, { kind: sel ? 'win' : 'idle', beat: menuBeat() + i * 0.5, t: 1 });
     ctx.restore();
     neon(ctx, c.name, cx, p[1] + 440, 30, c.theme, sel ? 14 : 6);
-    txt(ctx, c.epithet, cx, p[1] + 466, 14, 'rgba(255,255,255,0.7)');
+    txt(ctx, c.epithet, cx, p[1] + 466, 13, 'rgba(255,255,255,0.7)');
     txt(ctx, c.perk, cx, p[1] + 488, 13, c.theme);
     ctx.restore();
   });
-  txt(ctx, '←  →  VÄLJ      ENTER  KÖR      ESC  TILLBAKA', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
+  txt(ctx, '←  →  SELECT      ENTER  GO      ESC  BACK', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
   vignette(ctx);
 }
 
@@ -345,7 +357,7 @@ function renderSong() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.4, hue: 265, flash: 0 });
   ctx.fillStyle = 'rgba(3,2,8,0.55)';
   ctx.fillRect(0, 0, W, H);
-  neon(ctx, 'VÄLJ LÅT', W / 2, 90, 44, '#3ee6ff', 18);
+  neon(ctx, 'PICK YOUR TRACK', W / 2, 90, 40, '#3ee6ff', 18);
   SONG_CARDS.forEach((p, i) => {
     const sel = i === S.selSong;
     const info = MUAudio.trackInfo(i);
@@ -361,7 +373,6 @@ function renderSong() {
     ctx.stroke();
     ctx.shadowBlur = 0;
     const cx = p[0] + p[2] / 2;
-    // vinyl
     ctx.save();
     ctx.translate(cx, p[1] + 120);
     ctx.rotate(sel ? S.t * 1.8 : 0.4);
@@ -372,25 +383,25 @@ function renderSong() {
     ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2);
     ctx.fillStyle = hcol; ctx.fill();
     ctx.restore();
-    neon(ctx, info.name.split(' ')[0], cx, p[1] + 235, 26, hcol, sel ? 12 : 5);
-    neon(ctx, info.name.split(' ').slice(1).join(' '), cx, p[1] + 268, 26, hcol, sel ? 12 : 5);
+    const words = info.name.split(' ');
+    neon(ctx, words.slice(0, words.length - 1).join(' '), cx, p[1] + 235, 24, hcol, sel ? 12 : 5);
+    neon(ctx, words[words.length - 1], cx, p[1] + 268, 24, hcol, sel ? 12 : 5);
     txt(ctx, info.sub, cx, p[1] + 296, 14, 'rgba(255,255,255,0.7)');
-    // stars
     let stars = '';
     for (let s = 0; s < 3; s++) stars += s < info.stars ? '★' : '☆';
     txt(ctx, stars, cx, p[1] + 326, 22, '#ffd24a');
     const best = loadBest(i);
-    txt(ctx, best ? `REKORD  ${best.score}  [${best.rank}]` : 'INGET REKORD ÄN', cx, p[1] + 360, 14,
+    txt(ctx, best ? `BEST  ${best.score}  [${best.rank}]` : 'NO RECORD YET', cx, p[1] + 360, 14,
       best ? '#7dff5e' : 'rgba(255,255,255,0.4)');
     ctx.restore();
   });
-  txt(ctx, `KÄMPE: ${CHARS[S.selChar].name}`, W / 2, 615, 18, CHARS[S.selChar].theme);
-  txt(ctx, '←  →  VÄLJ      ENTER  KÖR      ESC  TILLBAKA', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
+  txt(ctx, `FIGHTER: ${CHARS[S.selChar].name}`, W / 2, 615, 18, CHARS[S.selChar].theme);
+  txt(ctx, '←  →  SELECT      ENTER  GO      ESC  BACK', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
   vignette(ctx);
 }
 
 function renderPlay() {
-  const now = MUAudio.time();
+  const now = P.now;
   const beat = Math.max(0, MUAudio.beat());
   const energy = energyNow(beat);
 
@@ -399,23 +410,42 @@ function renderPlay() {
 
   drawBG(ctx, { t: S.t, beat, energy, hue: P.info.hue, flash: P.flash });
 
-  // hit rings
   const bph = beat - Math.floor(beat);
   const pulse = Math.max(0, 1 - bph * 2.5);
+
+  // strike zone — vertical glow band where punches land
+  ctx.save();
+  const zoneW = 64;
+  const zg = ctx.createLinearGradient(HIT_X - zoneW / 2, 0, HIT_X + zoneW / 2, 0);
+  zg.addColorStop(0, 'transparent');
+  zg.addColorStop(0.5, `rgba(255,255,255,${0.05 + pulse * 0.07})`);
+  zg.addColorStop(1, 'transparent');
+  ctx.fillStyle = zg;
+  ctx.fillRect(HIT_X - zoneW / 2, ROW_Y[0] - 215, zoneW, ROW_Y[3] - ROW_Y[0] + 250);
+  ctx.strokeStyle = `rgba(255,255,255,${0.16 + pulse * 0.22})`;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 10]);
+  ctx.beginPath();
+  ctx.moveTo(HIT_X, ROW_Y[0] - 215);
+  ctx.lineTo(HIT_X, ROW_Y[3] + 35);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // hit rings
   for (let l = 0; l < 4; l++) {
     const ry = ROW_Y[l];
     ctx.strokeStyle = LANE_COL[l];
-    ctx.globalAlpha = 0.35 + pulse * 0.3;
+    ctx.globalAlpha = 0.4 + pulse * 0.35;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(HIT_X, ry, 46 + pulse * 5, 15 + pulse * 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(HIT_X, ry, 46 + pulse * 6, 15 + pulse * 2.5, 0, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.45;
     txt(ctx, LANE_KEYS[l], HIT_X, ry + 6, 17, LANE_COL[l]);
     ctx.globalAlpha = 1;
   }
 
-  // draw rows back→front; player inserted at its (interpolated) row
   const py = lerp(ROW_Y[P.rowFrom], ROW_Y[P.row], easeOut(P.rowT));
   const psc = lerp(ROW_SC[P.rowFrom], ROW_SC[P.row], easeOut(P.rowT));
   const poseT = clamp((S.t - P.pose.t0) / (P.pose.kind === 'punch' ? 0.22 : 0.4), 0, 1);
@@ -439,18 +469,42 @@ function renderPlay() {
         ctx.translate(x, ry);
         ctx.scale(rsc, rsc);
         const kind = (n.state === 'passed' && x < PLAYER_X + 110) ? 'attack' : 'run';
+        // stride locked to the beat so enemies march in time
         drawEnemy(ctx, { v: n.v, color: LANE_COL[l] },
-          { kind, ph: now * 11 + n.seed, t: clamp((PLAYER_X + 110 - x) / 90, 0, 1) });
+          { kind, ph: beat * Math.PI + (n.seed % 0.6), t: clamp((PLAYER_X + 110 - x) / 90, 0, 1) });
         ctx.restore();
         if (n.state === 'wait') {
-          const bp = Math.max(0, 1 - Math.abs(n.time - now) / 0.25);
-          drawKeyBadge(ctx, x, ry - 185 * rsc, LANE_KEYS[l], LANE_COL[l], bp);
+          const tLeft = n.time - now;
+          const bp = Math.max(0, 1 - Math.abs(tLeft) / 0.25);
+          const by = ry - 185 * rsc;
+          drawKeyBadge(ctx, x, by, LANE_KEYS[l], LANE_COL[l], bp);
+          // approach ring closes onto the badge exactly at the hit moment
+          const avis = Math.min(P.info.approach, 1.3);
+          if (tLeft <= avis && tLeft > -0.05) {
+            const k = Math.max(0, tLeft / avis);
+            ctx.strokeStyle = LANE_COL[l];
+            ctx.globalAlpha = 0.85 * (1 - k * 0.65);
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            ctx.arc(x, by, 22 + k * 58, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+          // white flash when inside the perfect window
+          if (Math.abs(tLeft) <= PERF_WIN) {
+            ctx.strokeStyle = '#fff';
+            ctx.globalAlpha = 0.9;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(x, by, 25, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
         }
       }
     }
-    // player on top of its row
     if (Math.round(lerp(P.rowFrom, P.row, easeOut(P.rowT))) === l) {
-      if (P.rowT < 0.45) { // afterimage at previous row
+      if (P.rowT < 0.45) {
         ctx.save();
         ctx.globalAlpha = 0.25;
         ctx.translate(PLAYER_X, ROW_Y[P.rowFrom]);
@@ -519,14 +573,13 @@ function renderPlay() {
   if (P.paused) {
     ctx.fillStyle = 'rgba(3,2,8,0.7)';
     ctx.fillRect(0, 0, W, H);
-    neon(ctx, 'PAUSAD', W / 2, 330, 60, '#3ee6ff', 20);
-    txt(ctx, 'ESC  FORTSÄTT       Q  AVBRYT', W / 2, 400, 20, 'rgba(255,255,255,0.7)');
+    neon(ctx, 'PAUSED', W / 2, 330, 60, '#3ee6ff', 20);
+    txt(ctx, 'ESC  RESUME       Q  QUIT', W / 2, 400, 20, 'rgba(255,255,255,0.7)');
   }
 }
 
 function renderHUD(now, beat) {
   const ch = CHARS[P.charIdx];
-  // HP bar
   const hpw = 300, hpf = clamp(P.hp / P.maxHp, 0, 1);
   MUArt.rr(ctx, 28, 24, hpw, 22, 11);
   ctx.fillStyle = 'rgba(8,5,16,0.8)'; ctx.fill();
@@ -537,23 +590,20 @@ function renderHUD(now, beat) {
     ctx.fill();
   }
   txt(ctx, ch.name, 30, 66, 15, ch.theme, 'left');
-  // score
   ctx.font = '30px "Russo One", sans-serif';
   ctx.textAlign = 'right';
   ctx.shadowColor = '#3ee6ff'; ctx.shadowBlur = 10;
   ctx.fillStyle = '#fff';
   ctx.fillText(String(P.score).padStart(7, '0'), W - 30, 50);
   ctx.shadowBlur = 0;
-  // combo
   if (P.combo >= 5) {
     const pop = 1 + P.comboPop * 0.25;
     ctx.save();
     ctx.translate(W / 2, 120);
     ctx.scale(pop, pop);
-    neon(ctx, `${P.combo} KOMBO`, 0, 0, 38, P.combo >= 50 ? '#ffd24a' : '#ff4fd8', 16);
+    neon(ctx, `${P.combo} COMBO`, 0, 0, 38, P.combo >= 50 ? '#ffd24a' : '#ff4fd8', 16);
     ctx.restore();
   }
-  // song progress
   const prog = clamp(now / P.info.duration, 0, 1);
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
   ctx.fillRect(0, H - 6, W, 6);
@@ -567,38 +617,35 @@ function renderResults() {
   ctx.fillStyle = 'rgba(3,2,8,0.7)';
   ctx.fillRect(0, 0, W, H);
   const rankCol = { S: '#ffd24a', A: '#7dff5e', B: '#3ee6ff', C: '#ff4fd8', D: '#ff5d5d' }[P.rank];
-  neon(ctx, 'KLART!', W / 2, 95, 48, '#3ee6ff', 18);
-  // rank
+  neon(ctx, 'TRACK CLEAR!', W / 2, 95, 46, '#3ee6ff', 18);
   ctx.save();
   ctx.translate(330, 330);
   ctx.rotate(-0.06);
   ctx.scale(1 + Math.sin(S.t * 3) * 0.02, 1 + Math.sin(S.t * 3) * 0.02);
   neon(ctx, P.rank, 0, 60, 190, rankCol, 38);
   ctx.restore();
-  txt(ctx, 'RANG', 330, 430, 20, 'rgba(255,255,255,0.6)');
-  // stats
+  txt(ctx, 'RANK', 330, 430, 20, 'rgba(255,255,255,0.6)');
   const lx = 560, vx = 880;
   const rows = [
-    ['POÄNG', String(P.score).padStart(7, '0'), '#fff'],
-    ['PERFEKT', P.counts.perfekt, '#ffd24a'],
-    ['BRA', P.counts.bra, '#3ee6ff'],
+    ['SCORE', String(P.score).padStart(7, '0'), '#fff'],
+    ['PERFECT', P.counts.perfect, '#ffd24a'],
+    ['GOOD', P.counts.good, '#3ee6ff'],
     ['MISS', P.counts.miss, '#ff5d5d'],
-    ['MAX KOMBO', P.maxCombo, '#ff4fd8'],
-    ['TRÄFFSÄKERHET', Math.round(P.acc * 100) + '%', '#7dff5e']
+    ['MAX COMBO', P.maxCombo, '#ff4fd8'],
+    ['ACCURACY', Math.round(P.acc * 100) + '%', '#7dff5e']
   ];
   rows.forEach((r, i) => {
     const y = 210 + i * 46;
     txt(ctx, r[0], lx, y, 20, 'rgba(255,255,255,0.65)', 'left');
     txt(ctx, String(r[1]), vx, y, 22, r[2], 'right');
   });
-  if (P.newBest) neon(ctx, 'NYTT REKORD!', 720, 510, 30, '#ffd24a', 16);
-  // winner
+  if (P.newBest) neon(ctx, 'NEW RECORD!', 720, 510, 30, '#ffd24a', 16);
   ctx.save();
   ctx.translate(1080, 600);
   ctx.scale(1.1, 1.1);
   drawFighter(ctx, P.charIdx, { kind: 'win', t: 1, beat: S.t * 1.8 });
   ctx.restore();
-  txt(ctx, 'R  IGEN       ENTER  LÅTVAL', W / 2, 672, 19, 'rgba(255,255,255,0.7)');
+  txt(ctx, 'R  RETRY       ENTER  TRACKS', W / 2, 672, 19, 'rgba(255,255,255,0.7)');
   vignette(ctx);
 }
 
@@ -606,13 +653,13 @@ function renderGameOver() {
   drawBG(ctx, { t: S.t, beat: S.t, energy: 0.15, hue: 0, flash: 0 });
   ctx.fillStyle = 'rgba(20,2,8,0.78)';
   ctx.fillRect(0, 0, W, H);
-  neon(ctx, 'UTSLAGEN!', W / 2, 270, 84, '#ff5d5d', 26);
-  txt(ctx, `${CHARS[P.charIdx].name} gick i golvet på ${P.info.name}`, W / 2, 330, 19, 'rgba(255,255,255,0.7)');
+  neon(ctx, 'KNOCKED OUT!', W / 2, 270, 76, '#ff5d5d', 26);
+  txt(ctx, `${CHARS[P.charIdx].name} hit the floor on ${P.info.name}`, W / 2, 330, 19, 'rgba(255,255,255,0.7)');
   ctx.save();
   ctx.translate(W / 2, 580);
   drawFighter(ctx, P.charIdx, { kind: 'hit', t: 0.5, beat: 0 });
   ctx.restore();
-  txt(ctx, 'R  FÖRSÖK IGEN       ENTER  LÅTVAL', W / 2, 660, 19, 'rgba(255,255,255,0.8)');
+  txt(ctx, 'R  RETRY       ENTER  TRACKS', W / 2, 660, 19, 'rgba(255,255,255,0.8)');
   vignette(ctx);
 }
 
@@ -689,10 +736,7 @@ function pointerDown(e) {
       });
       break;
     case 'play':
-      if (!P.paused) {
-        // tap zones: four vertical strips = D F J K
-        judge(clamp(Math.floor(p[0] / W * 4), 0, 3));
-      }
+      if (!P.paused) judge(clamp(Math.floor(p[0] / W * 4), 0, 3));
       break;
     case 'results':
     case 'gameover':
@@ -708,7 +752,7 @@ canvas.addEventListener('touchstart', e => { e.preventDefault(); ensureAudio(); 
 /* ---------------- debug handle ---------------- */
 
 window.__MU = {
-  version: '1.0.0',
+  version: '2.0.0',
   scene: () => S.scene,
   start: (c, s) => { S.selChar = c || 0; S.selSong = s || 0; MUAudio.unlock(); startPlay(); },
   hit: l => judge(l),
@@ -721,7 +765,10 @@ window.__MU = {
   finish: () => { if (P && S.scene === 'play') finishSong(); },
   kill: () => { if (P && S.scene === 'play') { P.hp = 0; } },
   mute: v => MUAudio.setMuted(v !== false),
-  goto: s => { S.scene = s; }
+  goto: s => { S.scene = s; },
+  // headless helpers: drive a frame manually and export the canvas
+  tick: ms => { update((ms || 16.7) / 1000); render(); },
+  shot: q => canvas.toDataURL('image/jpeg', q || 0.55)
 };
 
 /* ---------------- main loop ---------------- */
