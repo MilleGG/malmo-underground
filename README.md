@@ -15,6 +15,14 @@ All art is drawn in code on a canvas (cel-shaded anime style) — no image files
 | **SHERIFFEN** | Bald young viking with a sheriff's hat and a full braided beard. Perk: TANK (+35 HP) |
 | **VILGOT** | Tall, curly-maned smooth operator in a white tank, baggy jeans and flip flops. Perk: FLOW (forgiving timing) |
 | **MILLE** | Small blonde angel with a golden backslick, baggy linen shirt and Birkenstock loafers. Perk: STARDUST (+15% score) |
+| **SAGA** | Silver-bobbed striker in a grey crop top, shorts and star high-tops. Perk: TRIGGER (ultimate at 20 combo) |
+
+## Combat
+
+Punches mix with **kicks** (every 4th hit). At **25 combo** (20 for Saga) the
+**ULTIMATE** triggers: an anime cut-in plays, your fighter pulls two pistols,
+steps back and starts **shooting** enemies instead — tracers, shells, muzzle
+flash — at **1.5× score** until the combo breaks.
 
 ## Tracks
 

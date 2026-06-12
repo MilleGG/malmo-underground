@@ -490,7 +490,7 @@ function hairMille(ctx, hx, hy, r, halo) {
 const CHARS = [
   {
     id: 'sheriffen', name: 'SHERIFFEN', epithet: 'THE LONG ARM OF THE LAW',
-    perk: 'TANK — +35 HP', hp: 135, winMult: 1, scoreMult: 1,
+    perk: 'TANK — +35 HP', hp: 135, winMult: 1, scoreMult: 1, ultraAt: 25,
     h: 1.02, headR: 21, wide: 1.16,
     skin: '#f4c79b', iris: ['#bfe8ff', '#5da9dd', '#1d4e7a'], eyeW: 0.44, eyeH: 0.4,
     rim: 'rgba(62,230,255,0.4)',
@@ -498,7 +498,7 @@ const CHARS = [
   },
   {
     id: 'vilgot', name: 'VILGOT', epithet: 'SMOOTH OPERATOR',
-    perk: 'FLOW — forgiving timing', hp: 100, winMult: 1.3, scoreMult: 1,
+    perk: 'FLOW — forgiving timing', hp: 100, winMult: 1.3, scoreMult: 1, ultraAt: 25,
     h: 1.14, headR: 21, wide: 0.97, shades: true,
     skin: '#eebd92', iris: ['#cbb59a', '#8a6a48', '#3c2a18'], eyeW: 0.42, eyeH: 0.36,
     rim: 'rgba(255,79,216,0.4)',
@@ -506,13 +506,208 @@ const CHARS = [
   },
   {
     id: 'mille', name: 'MILLE', epithet: 'ANGEL FACE',
-    perk: 'STARDUST — +15% score', hp: 100, winMult: 1, scoreMult: 1.15,
+    perk: 'STARDUST — +15% score', hp: 100, winMult: 1, scoreMult: 1.15, ultraAt: 25,
     h: 0.88, headR: 24, wide: 1.0, blush: true,
     skin: '#fad7b2', iris: ['#d2f7d9', '#62c98a', '#1f6b46'], eyeW: 0.52, eyeH: 0.5,
     rim: 'rgba(255,210,74,0.45)',
     theme: '#7dff5e'
+  },
+  {
+    id: 'saga', name: 'SAGA', epithet: 'SILVERPILEN',
+    perk: 'TRIGGER — ultimate at 20 combo', hp: 100, winMult: 1, scoreMult: 1, ultraAt: 20,
+    h: 1.08, headR: 20.5, wide: 0.78, female: true, portrait: true,
+    skin: '#f2c9a4', iris: ['#cfe8ff', '#5b9bd9', '#1d4877'], eyeW: 0.5, eyeH: 0.46,
+    rim: 'rgba(62,230,255,0.45)',
+    theme: '#cfd6e0',
+    hair: '#dfe3e8', hairSh: '#a9b2c0'
   }
 ];
+
+/* dual pistol, pointing +x from (x,y) */
+function drawGun(ctx, x, y, ang, flash) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  ctx.fillStyle = '#23252e';
+  ctx.strokeStyle = OUT; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  rr(ctx, 2, -6, 26, 9, 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#3a3d46';
+  ctx.save();
+  ctx.translate(6, 2); ctx.rotate(0.25);
+  rr(ctx, 0, 0, 8, 13, 2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = '#5a5e6a'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(5, -4); ctx.lineTo(24, -4); ctx.stroke();
+  if (flash > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(32, -1.5);
+    ctx.globalAlpha = flash;
+    ctx.fillStyle = '#fff3b0';
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = i * TAU / 8;
+      const rad = i % 2 ? 5 : 15 + flash * 6;
+      ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad * 0.7);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,200,80,0.5)';
+    ctx.beginPath(); ctx.arc(0, 0, 20, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function hairSaga(ctx, hx, hy, r, ch) {
+  // silver bob: blunt bangs over the forehead, side locks framing the face,
+  // rounded crown flaring slightly at jaw level
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(hx + r * 0.98, hy - r * 0.12);                                   // near lock outer top
+    c.quadraticCurveTo(hx + r * 1.12, hy + r * 0.4, hx + r * 1.0, hy + r * 0.72); // near lock bottom outer
+    c.lineTo(hx + r * 0.58, hy + r * 0.66);                                   // blunt cut
+    c.quadraticCurveTo(hx + r * 0.62, hy + r * 0.2, hx + r * 0.6, hy - r * 0.02); // inner edge along cheek
+    // bangs bottom edge with blunt notches
+    c.lineTo(hx + r * 0.34, hy - r * 0.22);
+    c.lineTo(hx + r * 0.12, hy - r * 0.1);
+    c.lineTo(hx - r * 0.12, hy - r * 0.26);
+    c.lineTo(hx - r * 0.32, hy - r * 0.12);
+    c.lineTo(hx - r * 0.52, hy - r * 0.28);
+    c.quadraticCurveTo(hx - r * 0.7, hy - r * 0.12, hx - r * 0.75, hy + r * 0.1); // far inner
+    c.lineTo(hx - r * 0.78, hy + r * 0.78);
+    c.lineTo(hx - r * 1.22, hy + r * 0.85);                                   // far lock blunt bottom
+    c.quadraticCurveTo(hx - r * 1.32, hy + r * 0.2, hx - r * 1.28, hy - r * 0.3); // far outer
+    c.quadraticCurveTo(hx - r * 1.05, hy - r * 1.25, hx - r * 0.1, hy - r * 1.32); // crown
+    c.quadraticCurveTo(hx + r * 0.75, hy - r * 1.3, hx + r * 0.98, hy - r * 0.12);
+    c.closePath();
+  }, ch.hair, { lw: 2.8, shade: 0.14, rim: 'rgba(255,255,255,0.5)' });
+  // under-shadow beneath the bangs
+  ctx.strokeStyle = 'rgba(90,80,110,0.35)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(hx + r * 0.5, hy - r * 0.06);
+  ctx.lineTo(hx + r * 0.34, hy - r * 0.16);
+  ctx.lineTo(hx + r * 0.12, hy - r * 0.04);
+  ctx.lineTo(hx - r * 0.12, hy - r * 0.2);
+  ctx.lineTo(hx - r * 0.32, hy - r * 0.06);
+  ctx.stroke();
+  // strand lines in the bangs
+  ctx.strokeStyle = ch.hairSh; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(hx + r * (0.4 - i * 0.26), hy - r * 0.95);
+    ctx.lineTo(hx + r * (0.32 - i * 0.25), hy - r * (0.3 - (i % 2) * 0.08));
+    ctx.stroke();
+  }
+  // glossy shine band across the crown
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(hx + r * 0.62, hy - r * 0.88);
+  ctx.quadraticCurveTo(hx + r * 0.1, hy - r * 1.14, hx - r * 0.5, hy - r * 0.92);
+  ctx.stroke();
+}
+
+/* static select-screen portrait (bust) — origin at head centre */
+function drawPortrait(ctx, idx, scale) {
+  const ch = CHARS[idx];
+  ctx.save();
+  ctx.scale(scale || 1, scale || 1);
+  const r = 46;
+  // shoulders + halter top
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(-r * 1.7, r * 2.6);
+    c.quadraticCurveTo(-r * 1.55, r * 1.45, -r * 0.6, r * 1.18);
+    c.lineTo(r * 0.6, r * 1.18);
+    c.quadraticCurveTo(r * 1.55, r * 1.45, r * 1.7, r * 2.6);
+    c.closePath();
+  }, ch.skin, { lw: 3 });
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(-r * 1.45, r * 2.6);
+    c.quadraticCurveTo(-r * 1.2, r * 1.85, -r * 0.45, r * 1.62);
+    c.quadraticCurveTo(0, r * 1.8, r * 0.45, r * 1.62);
+    c.quadraticCurveTo(r * 1.2, r * 1.85, r * 1.45, r * 2.6);
+    c.closePath();
+  }, '#9aa1ab', { lw: 3, shade: 0.14 });
+  // black halter collar
+  ctx.strokeStyle = '#15161c'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.45, r * 1.62);
+  ctx.quadraticCurveTo(0, r * 1.34, r * 0.45, r * 1.62);
+  ctx.stroke();
+  // neck
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(-r * 0.22, r * 0.7);
+    c.lineTo(-r * 0.22, r * 1.5);
+    c.lineTo(r * 0.22, r * 1.5);
+    c.lineTo(r * 0.22, r * 0.7);
+    c.closePath();
+  }, ch.skin, { lw: 2.6, shade: 0.22 });
+  // head — front-facing for the portrait
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(-r * 0.92, hyP(-0.1, r));
+    c.quadraticCurveTo(-r * 0.95, -r * 1.0, 0, -r * 1.08);
+    c.quadraticCurveTo(r * 0.95, -r * 1.0, r * 0.92, hyP(-0.1, r));
+    c.quadraticCurveTo(r * 0.88, r * 0.45, r * 0.45, r * 0.86);
+    c.quadraticCurveTo(r * 0.2, r * 1.04, 0, r * 1.05);
+    c.quadraticCurveTo(-r * 0.2, r * 1.04, -r * 0.45, r * 0.86);
+    c.quadraticCurveTo(-r * 0.88, r * 0.45, -r * 0.92, hyP(-0.1, r));
+    c.closePath();
+  }, ch.skin, { lw: 3, rim: ch.rim });
+  // ears
+  [-1, 1].forEach(s => {
+    cel(ctx, c => {
+      c.beginPath();
+      c.ellipse(s * r * 0.92, r * 0.18, r * 0.12, r * 0.2, 0, 0, TAU);
+    }, ch.skin, { lw: 2, shade: 0.1 });
+  });
+  // eyes — big, symmetric
+  [-1, 1].forEach(s => {
+    animeEye(ctx, s * r * 0.42, r * 0.1, r * 0.46, r * 0.44, { iris: ch.iris });
+    browLine(ctx, s * r * 0.42, -r * 0.24, r * 0.4, false);
+  });
+  // nose + gentle smile
+  ctx.strokeStyle = 'rgba(23,16,40,0.5)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-r * 0.03, r * 0.42); ctx.lineTo(r * 0.04, r * 0.5); ctx.stroke();
+  ctx.strokeStyle = OUT; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.16, r * 0.72);
+  ctx.quadraticCurveTo(0, r * 0.84, r * 0.16, r * 0.72);
+  ctx.stroke();
+  // bob, front view: bangs + symmetric side locks
+  cel(ctx, c => {
+    c.beginPath();
+    c.moveTo(-r * 1.18, r * 0.95);
+    c.quadraticCurveTo(-r * 1.28, -r * 0.4, -r * 0.85, -r * 1.05);
+    c.quadraticCurveTo(0, -r * 1.5, r * 0.85, -r * 1.05);
+    c.quadraticCurveTo(r * 1.28, -r * 0.4, r * 1.18, r * 0.95);
+    c.lineTo(r * 0.78, r * 0.88);
+    c.quadraticCurveTo(r * 0.82, r * 0.1, r * 0.74, -r * 0.18);
+    // bangs bottom edge across the brow
+    c.lineTo(r * 0.45, -r * 0.32);
+    c.lineTo(r * 0.18, -r * 0.18);
+    c.lineTo(-r * 0.1, -r * 0.34);
+    c.lineTo(-r * 0.4, -r * 0.2);
+    c.lineTo(-r * 0.74, -r * 0.18);
+    c.quadraticCurveTo(-r * 0.82, r * 0.1, -r * 0.78, r * 0.88);
+    c.closePath();
+  }, ch.hair, { lw: 3, shade: 0.14, rim: 'rgba(255,255,255,0.5)' });
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(r * 0.62, -r * 0.85);
+  ctx.quadraticCurveTo(0, -r * 1.22, -r * 0.62, -r * 0.85);
+  ctx.stroke();
+  ctx.strokeStyle = ch.hairSh; ctx.lineWidth = 1.8;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * r * 0.28, -r * 1.05);
+    ctx.lineTo(i * r * 0.3 + r * 0.04, -r * (0.32 - Math.abs(i) * 0.04));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function hyP(v, r) { return v * r; }
 
 function fistShape(ctx, x, y, r, skin, big) {
   cel(ctx, c => {
@@ -540,20 +735,25 @@ function drawFighter(ctx, idx, pose) {
   ctx.save();
   ctx.scale(ch.h, ch.h);
 
-  let ext = 0, shift = 0;
+  const gun = k === 'gunidle' || k === 'shoot' || k === 'draw';
+  let ext = 0, shift = 0, kext = 0;
   if (k === 'punch') {
     ext = t < 0.34 ? easeOut(t / 0.34) : 1 - (t - 0.34) / 0.66 * 0.75;
     shift = ext * 30;
   }
+  if (k === 'kick') {
+    kext = t < 0.36 ? easeOut(t / 0.36) : 1 - (t - 0.36) / 0.64 * 0.7;
+    shift = kext * 8;
+  }
   if (k === 'hit') shift = -Math.sin(Math.min(t, 1) * Math.PI) * 28;
   const win = k === 'win';
-  const bob = (k === 'idle' || win) ? -Math.abs(Math.sin(beat * Math.PI)) * 5 : 0;
+  const bob = (k === 'idle' || k === 'gunidle' || win) ? -Math.abs(Math.sin(beat * Math.PI)) * 5 : 0;
   const sway = k === 'idle' ? Math.sin(beat * Math.PI / 2) * 2.5 : 0;
 
   const wf = ch.wide;
   const hipY = -126 + bob * 0.5, shY = -208 + bob;
-  const hipX = shift * 0.45 + sway * 0.4;
-  const shX = shift + sway;
+  const hipX = shift * 0.45 + sway * 0.4 + kext * 10;
+  const shX = shift + sway - kext * 10;
   const hx = shX + 11 + (k === 'hit' ? -14 : 0);
   const hy = -246 + bob + (k === 'hit' ? 7 : 0);
   const r = ch.headR;
@@ -567,52 +767,120 @@ function drawFighter(ctx, idx, pose) {
   let fElb = [lerp(shX + 34, shX + 94, ext), lerp(shY + 40, shY + 22 + aim * 0.18, ext)];
   let bFist = [lerp(shX + 12, shX - 42, ext), lerp(shY + orb * 0.6, shY + 36, ext)];
   let bElb = [lerp(shX - 12, shX - 34, ext), lerp(shY + 42, shY + 26, ext)];
+  if (k === 'kick') {
+    // arms counterbalance the kick
+    fFist = [shX - 16 - kext * 12, shY + 32]; fElb = [shX - 2, shY + 22];
+    bFist = [shX + 36 + kext * 10, shY + 10]; bElb = [shX + 20, shY + 24];
+  }
   if (k === 'hit') {
     fFist = [shX + 36, shY + 54]; fElb = [shX + 28, shY + 30];
     bFist = [shX - 38, shY + 48]; bElb = [shX - 30, shY + 26];
   }
+  let recF = 0, recB = 0;
+  if (gun) {
+    if (k === 'shoot') {
+      const rec = 1 - t;
+      if ((pose.arm || 0) === 0) recF = rec; else recB = rec;
+    }
+    if (k === 'draw') {
+      const dt2 = clamp(t, 0, 1);
+      fFist = [lerp(shX - 6, shX + 74, dt2), lerp(hipY + 6, shY + 14, dt2)];
+      fElb = [lerp(shX + 12, shX + 44, dt2), lerp(hipY - 12, shY + 24, dt2)];
+      bFist = [lerp(shX + 20, shX + 60, dt2), lerp(hipY + 2, shY + 28, dt2)];
+      bElb = [lerp(shX - 2, shX + 34, dt2), lerp(hipY - 14, shY + 34, dt2)];
+    } else {
+      fFist = [shX + 74, shY + 14 - recF * 11];
+      fElb = [shX + 44, shY + 24 - recF * 4];
+      bFist = [shX + 60, shY + 28 - recB * 11];
+      bElb = [shX + 34, shY + 36 - recB * 4];
+    }
+  }
   if (win) {
     if (ch.id === 'sheriffen') { fFist = [hx + 22, hy - r * 1.15]; fElb = [shX + 40, shY - 10]; }
     else if (ch.id === 'vilgot') { fFist = [shX + 48, shY - 70]; fElb = [shX + 34, shY - 22]; }
+    else if (ch.id === 'saga') { fFist = [shX + 34, shY - 64]; fElb = [shX + 28, shY - 16]; }
     else {
       fFist = [shX + 42, shY - 62]; fElb = [shX + 30, shY - 14];
       bFist = [shX - 40, shY - 60]; bElb = [shX - 28, shY - 12];
     }
   }
 
-  const fFootX = 40 + shift * 0.75, bFootX = -36 + shift * 0.2;
-  const fKnee = [(hipX + 10 + fFootX) / 2 + 9 + ext * 7, -64 + bob * 0.25];
+  let fFootX = 40 + shift * 0.75, bFootX = -36 + shift * 0.2;
+  let fFootY = 0, fShoeTilt = 0;
+  let fKnee = [(hipX + 10 + fFootX) / 2 + 9 + ext * 7, -64 + bob * 0.25];
   const bKneeBend = 8 * (1 - ext);
   const bKnee = [(hipX - 10 + bFootX) / 2 - bKneeBend * 0.4, -64 + bob * 0.25];
+  if (k === 'kick') {
+    // front leg snaps out toward the enemy
+    fFootX = lerp(40, 132, kext);
+    fFootY = lerp(0, -126 + aim * 0.3, kext);
+    fKnee = [lerp(fKnee[0], (hipX + 10 + fFootX) / 2 + 4, kext), lerp(-64, -108, kext)];
+    fShoeTilt = -1.15 * kext;
+  }
 
-  const pants = ch.id === 'sheriffen' ? '#6b7158' : ch.id === 'vilgot' ? '#4f6e9a' : '#5b7ba6';
-  const topCol = ch.id === 'sheriffen' ? '#39414e' : ch.id === 'vilgot' ? '#f5f2ea' : '#f8f4e9';
-  const thighW = ch.id === 'mille' ? 12 : 13.5;
-  const calfW = ch.id === 'mille' ? 9 : 10;
+  const female = !!ch.female;
+  const pants = female ? ch.skin
+    : ch.id === 'sheriffen' ? '#6b7158' : ch.id === 'vilgot' ? '#4f6e9a' : '#5b7ba6';
+  const topCol = ch.id === 'sheriffen' ? '#39414e' : ch.id === 'vilgot' ? '#f5f2ea'
+    : ch.id === 'saga' ? '#9aa1ab' : '#f8f4e9';
+  const thighW = female ? 10.5 : ch.id === 'mille' ? 12 : 13.5;
+  const calfW = female ? 7 : ch.id === 'mille' ? 9 : 10;
+  const legB = female ? 0 : 7; // baggy-pants extra width
+  const gunAng = k === 'draw' ? (1 - clamp(t, 0, 1)) * 1.1 : 0;
 
   // ---- hair behind everything
   if (ch.id === 'vilgot') vilgotHairBack(ctx, hx, hy, r);
 
-  // ---- back arm
+  // ---- back arm (+ gun behind the body)
   drawArm(ctx, ch, bSh, bElb, bFist, topCol, false);
+  if (gun) drawGun(ctx, bFist[0], bFist[1] - 2, gunAng - recB * 0.32,
+    (k === 'shoot' && (pose.arm || 0) === 1 && t < 0.35) ? 1 - t / 0.35 : 0);
 
   // ---- back leg
-  limbT(ctx, hipX - 10, hipY + 4, thighW + 7, bKnee[0], bKnee[1], calfW + 5, pants, { shade: 0.22 });
-  limbT(ctx, bKnee[0], bKnee[1], calfW + 5, bFootX, -14, calfW + 3, pants, { shade: 0.22 });
+  limbT(ctx, hipX - 10, hipY + 4, thighW + legB, bKnee[0], bKnee[1], calfW + legB * 0.7, pants, { shade: 0.22 });
+  limbT(ctx, bKnee[0], bKnee[1], calfW + legB * 0.7, bFootX, -14, calfW + legB * 0.45, pants, { shade: 0.22 });
   shoe(ctx, ch, bFootX, 0, -ext * 0.5);
 
   // ---- torso
   drawTorso(ctx, ch, hipX, hipY, shX, shY, topCol, wf, beat, k);
 
   // ---- front leg
-  limbT(ctx, hipX + 10, hipY + 4, thighW + 7, fKnee[0], fKnee[1], calfW + 5, pants, { rim: ch.rim });
-  limbT(ctx, fKnee[0], fKnee[1], calfW + 5, fFootX, -14, calfW + 3, pants, {});
-  // cuff bunch
-  cel(ctx, c => {
-    c.beginPath();
-    c.ellipse(fFootX, -15, calfW + 8, 7, 0, 0, TAU);
-  }, pants, { lw: 2.2, shade: 0.18 });
-  shoe(ctx, ch, fFootX, 0, 0);
+  limbT(ctx, hipX + 10, hipY + 4, thighW + legB, fKnee[0], fKnee[1], calfW + legB * 0.7, pants, { rim: ch.rim });
+  limbT(ctx, fKnee[0], fKnee[1], calfW + legB * 0.7, fFootX, fFootY - 14, calfW + legB * 0.45, pants, {});
+  if (!female) {
+    // cuff bunch
+    cel(ctx, c => {
+      c.beginPath();
+      c.ellipse(fFootX, fFootY - 15, calfW + 8, 7, fShoeTilt * 0.5, 0, TAU);
+    }, pants, { lw: 2.2, shade: 0.18 });
+  }
+  shoe(ctx, ch, fFootX, fFootY, fShoeTilt);
+  if (female) {
+    // grey shorts with black belt + hem
+    cel(ctx, c => {
+      c.beginPath();
+      c.moveTo(hipX - 21, hipY - 4);
+      c.lineTo(hipX + 23, hipY - 4);
+      c.quadraticCurveTo(hipX + 26, hipY + 18, hipX + 22, hipY + 30);
+      c.lineTo(hipX + 3, hipY + 28);
+      c.lineTo(hipX + 1, hipY + 16);
+      c.lineTo(hipX - 3, hipY + 27);
+      c.lineTo(hipX - 20, hipY + 26);
+      c.quadraticCurveTo(hipX - 24, hipY + 12, hipX - 21, hipY - 4);
+      c.closePath();
+    }, '#8e959f', { lw: 2.6, shade: 0.16 });
+    // black hems
+    ctx.strokeStyle = '#15161c'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hipX + 4, hipY + 28); ctx.lineTo(hipX + 21, hipY + 30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hipX - 19, hipY + 26); ctx.lineTo(hipX - 4, hipY + 27); ctx.stroke();
+    // belt + buckle
+    ctx.fillStyle = '#15161c';
+    ctx.fillRect(hipX - 21, hipY - 6, 44, 8);
+    ctx.fillStyle = '#c9ced6';
+    ctx.fillRect(hipX - 2, hipY - 7, 9, 10);
+    ctx.strokeStyle = OUT; ctx.lineWidth = 1.6;
+    ctx.strokeRect(hipX - 2, hipY - 7, 9, 10);
+  }
 
   // ---- neck + head
   limbT(ctx, shX + 6, shY - 2, 7.5, hx - 2, hy + r * 0.85, 7, ch.skin, { lw: 2.4 });
@@ -620,6 +888,7 @@ function drawFighter(ctx, idx, pose) {
   drawFace(ctx, hx, hy, r, ch, k);
   if (ch.id === 'sheriffen') hairSheriffen(ctx, hx, hy, r);
   else if (ch.id === 'vilgot') vilgotHairFront(ctx, hx, hy, r);
+  else if (ch.id === 'saga') hairSaga(ctx, hx, hy, r, ch);
   else hairMille(ctx, hx, hy, r, win);
 
   // ---- front arm with ghost trail / speedlines
@@ -637,8 +906,19 @@ function drawFighter(ctx, idx, pose) {
     ctx.globalAlpha = 1;
   }
   drawArm(ctx, ch, fSh, fElb, fFist, topCol, true);
-  if (k === 'punch' && ext > 0.7) {
-    // anime speedlines behind the fist
+  if (gun) drawGun(ctx, fFist[0], fFist[1] - 2, gunAng - recF * 0.32,
+    (k === 'shoot' && (pose.arm || 0) === 0 && t < 0.35) ? 1 - t / 0.35 : 0);
+  if (win && ch.id === 'saga') {
+    // index finger raised, like the reference sheet
+    ctx.strokeStyle = OUT; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(fFist[0] + 2, fFist[1] - 6); ctx.lineTo(fFist[0] + 5, fFist[1] - 22); ctx.stroke();
+    ctx.strokeStyle = ch.skin; ctx.lineWidth = 4.5;
+    ctx.beginPath(); ctx.moveTo(fFist[0] + 2, fFist[1] - 6); ctx.lineTo(fFist[0] + 5, fFist[1] - 21); ctx.stroke();
+  }
+  const strikeEnd = (k === 'punch' && ext > 0.7) ? fFist : (k === 'kick' && kext > 0.7) ? [fFootX, fFootY - 12] : null;
+  if (strikeEnd) {
+    const sext = k === 'punch' ? ext : kext;
+    // anime speedlines behind the striking limb
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.strokeStyle = 'rgba(255,255,255,0.6)';
@@ -646,14 +926,13 @@ function drawFighter(ctx, idx, pose) {
     for (let i = -1; i <= 1; i++) {
       ctx.lineWidth = i === 0 ? 3 : 1.8;
       ctx.beginPath();
-      ctx.moveTo(fFist[0] - 36, fFist[1] + i * 10);
-      ctx.lineTo(fFist[0] - 120 - Math.abs(i) * 18, fFist[1] + i * 13);
+      ctx.moveTo(strikeEnd[0] - 36, strikeEnd[1] + i * 10);
+      ctx.lineTo(strikeEnd[0] - 120 - Math.abs(i) * 18, strikeEnd[1] + i * 13);
       ctx.stroke();
     }
-    if (ext > 0.85) {
-      // impact star at the fist
-      ctx.translate(fFist[0] + 10, fFist[1]);
-      ctx.rotate(ext * 2);
+    if (sext > 0.85) {
+      ctx.translate(strikeEnd[0] + 10, strikeEnd[1]);
+      ctx.rotate(sext * 2);
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
@@ -675,6 +954,30 @@ function drawFighter(ctx, idx, pose) {
 }
 
 function drawArm(ctx, ch, sh, elb, fist, topCol, front) {
+  if (ch.id === 'saga') {
+    // slim bare arms
+    limbT(ctx, sh[0], sh[1], 8.5, elb[0], elb[1], 7, ch.skin, { shade: 0.16 });
+    limbT(ctx, elb[0], elb[1], 7, fist[0], fist[1], 6, ch.skin, { rim: front ? ch.rim : null });
+    if (front) {
+      // yellow ribbon tied on the upper arm
+      const rx = lerp(sh[0], elb[0], 0.42), ry = lerp(sh[1], elb[1], 0.42);
+      ctx.strokeStyle = '#ffd92e'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(rx - 8, ry - 4); ctx.lineTo(rx + 8, ry + 2); ctx.stroke();
+      ctx.fillStyle = '#ffd92e';
+      ctx.strokeStyle = OUT; ctx.lineWidth = 1.6;
+      // bow loops + tails
+      ctx.beginPath();
+      ctx.moveTo(rx - 8, ry - 4);
+      ctx.lineTo(rx - 18, ry - 12); ctx.lineTo(rx - 13, ry); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(rx - 8, ry - 2);
+      ctx.lineTo(rx - 19, ry + 2); ctx.lineTo(rx - 12, ry + 8); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+    fistShape(ctx, fist[0], fist[1], 8.5, ch.skin);
+    return;
+  }
   const upperW = 11, lowerW = 9.5;
   if (ch.id === 'sheriffen') {
     // tee sleeve over the upper arm
@@ -695,6 +998,51 @@ function drawArm(ctx, ch, sh, elb, fist, topCol, front) {
 }
 
 function drawTorso(ctx, ch, hipX, hipY, shX, shY, topCol, wf, beat, k) {
+  if (ch.id === 'saga') {
+    // slim torso with bare midriff
+    cel(ctx, c => {
+      c.beginPath();
+      c.moveTo(hipX - 17, hipY + 4);
+      c.quadraticCurveTo(hipX - 13, hipY - 24, shX - 16, hipY - 44);
+      c.quadraticCurveTo(shX - 20 * wf - 3, shY + 24, shX - 19 * wf, shY - 6);
+      c.quadraticCurveTo(shX, shY - 15, shX + 19 * wf, shY - 6);
+      c.quadraticCurveTo(shX + 20 * wf + 3, shY + 24, shX + 16, hipY - 44);
+      c.quadraticCurveTo(hipX + 13, hipY - 24, hipX + 17, hipY + 4);
+      c.closePath();
+    }, ch.skin, { lw: 3, rim: ch.rim });
+    // navel
+    ctx.strokeStyle = 'rgba(120,80,60,0.55)'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hipX + 1, hipY - 16); ctx.lineTo(hipX + 1, hipY - 11); ctx.stroke();
+    // grey halter crop top with black trim
+    cel(ctx, c => {
+      c.beginPath();
+      c.moveTo(shX - 19 * wf - 2, shY + 2);
+      c.lineTo(shX - 8, shY - 9);
+      c.quadraticCurveTo(shX, shY - 2, shX + 8, shY - 9);
+      c.lineTo(shX + 19 * wf + 2, shY + 2);
+      c.quadraticCurveTo(shX + 21 * wf + 2, shY + 30, shX + 15, shY + 52);
+      c.quadraticCurveTo(shX, shY + 60, shX - 15, shY + 52);
+      c.quadraticCurveTo(shX - 21 * wf - 2, shY + 30, shX - 19 * wf - 2, shY + 2);
+      c.closePath();
+    }, topCol, { lw: 2.8, shade: 0.14 });
+    // bust shading line
+    ctx.strokeStyle = 'rgba(60,60,80,0.4)'; ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(shX - 8, shY + 30);
+    ctx.quadraticCurveTo(shX + 2, shY + 36, shX + 12, shY + 30);
+    ctx.stroke();
+    // black collar + bottom band
+    ctx.strokeStyle = '#15161c'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(shX - 9, shY - 8);
+    ctx.quadraticCurveTo(shX, shY - 1, shX + 9, shY - 8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(shX - 15, shY + 52);
+    ctx.quadraticCurveTo(shX, shY + 60, shX + 15, shY + 52);
+    ctx.stroke();
+    return;
+  }
   if (ch.id === 'vilgot') {
     // skin shoulders/chest first
     cel(ctx, c => {
@@ -795,6 +1143,38 @@ function drawTorso(ctx, ch, hipX, hipY, shX, shY, topCol, wf, beat, k) {
 function shoe(ctx, ch, x, y, tilt) {
   ctx.save();
   ctx.translate(x, y); ctx.rotate(tilt);
+  if (ch.id === 'saga') {
+    // high-top sneaker: white body, black toe/heel panels, yellow strap, star
+    cel(ctx, c => {
+      c.beginPath();
+      c.moveTo(-11, 0);
+      c.lineTo(-11, -17);
+      c.quadraticCurveTo(-2, -19, 3, -14);
+      c.quadraticCurveTo(16, -12, 22, -5);
+      c.quadraticCurveTo(24, -2, 22, 0);
+      c.closePath();
+    }, '#f4f4f4', { lw: 2.4, shade: 0.1 });
+    ctx.fillStyle = '#15161c';
+    ctx.beginPath();
+    ctx.moveTo(-11, -3); ctx.lineTo(22, -3); ctx.lineTo(23, 0); ctx.lineTo(-11, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#ffd92e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-10, -13); ctx.lineTo(0, -11); ctx.stroke();
+    // star
+    ctx.fillStyle = '#15161c';
+    ctx.save();
+    ctx.translate(6, -8);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5;
+      const rad = i % 2 ? 1.6 : 3.6;
+      ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
   if (ch.id === 'vilgot') {
     cel(ctx, c => { c.beginPath(); c.ellipse(8, -2, 21, 6, 0, 0, TAU); }, '#2e2e30', { lw: 2.2, shade: 0.2 });
     cel(ctx, c => { c.beginPath(); c.ellipse(7, -7, 17, 6, 0, 0, TAU); }, ch.skin, { lw: 2, shade: 0.1 });
@@ -1205,6 +1585,6 @@ function vignette(ctx) {
 
 function resetCache() { wallCache = null; signCache = null; wallHue = -1; signHue = -1; }
 
-return { CHARS, drawFighter, drawEnemy, drawKeyBadge, drawBG, vignette, resetCache, FLOOR_Y, rr, lerp, clamp, easeOut };
+return { CHARS, drawFighter, drawEnemy, drawKeyBadge, drawBG, drawPortrait, vignette, resetCache, FLOOR_Y, rr, lerp, clamp, easeOut };
 
 })();

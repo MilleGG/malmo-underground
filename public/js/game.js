@@ -135,6 +135,7 @@ function startPlay() {
     shake: 0, flash: 0,
     paused: false, autoplay: false,
     comboPop: 0, newBest: false,
+    ultra: null, shotArm: 0, gunX: 0,
     now: -0.9 // smoothed song clock (drift-corrected toward audio clock)
   };
   MUAudio.play(songIdx);
@@ -142,37 +143,56 @@ function startPlay() {
 }
 
 const POWS = ['POW!', 'WHAM!', 'SMACK!', 'BOOM!', 'CRACK!'];
+const GUNPOWS = ['BANG!', 'BLAM!', 'RAT-TAT!', 'PEW PEW!'];
 
 function judge(lane) {
   if (!P || P.paused) return;
   const now = MUAudio.time();
   const ch = CHARS[P.charIdx];
   const win = GOOD_WIN * ch.winMult;
+  const intro = P.ultra && P.ultra.state === 'intro';
+  const gunsOut = P.ultra && P.ultra.state === 'active';
   let best = null, bd = 1e9, bdSigned = 0;
   for (const n of P.active) {
     if (n.state !== 'wait' || n.lane !== lane) continue;
     const d = Math.abs(n.time - now);
     if (d < bd) { bd = d; bdSigned = n.time - now; best = n; }
   }
-  P.pose = { kind: 'punch', t0: S.t };
-  if (P.rowT >= 1) { P.rowFrom = P.row; }
-  P.row = lane; P.rowT = 0;
   if (!best || bd > win) {
-    MUAudio.sfx('whiff');
+    if (!intro) {
+      P.pose = { kind: gunsOut ? 'shoot' : 'punch', t0: S.t, arm: P.shotArm ^= 1 };
+      if (P.rowT >= 1) { P.rowFrom = P.row; }
+      P.row = lane; P.rowT = 0;
+      MUAudio.sfx(gunsOut ? 'gunshot' : 'whiff');
+    }
     return;
+  }
+  // strike: guns in ultra, otherwise every 4th hit is a kick
+  if (!intro) {
+    const strike = gunsOut ? 'shoot' : ((P.combo + 1) % 4 === 0 ? 'kick' : 'punch');
+    P.pose = { kind: strike, t0: S.t, arm: P.shotArm ^= 1 };
+    if (P.rowT >= 1) { P.rowFrom = P.row; }
+    P.row = lane; P.rowT = 0;
   }
   const perfect = bd <= PERF_WIN * ch.winMult;
   best.state = 'dying';
   best.px = xFor(best, now);
   best.py = 0;
-  best.vx = 500 + Math.random() * 400;
-  best.vy = -(420 + Math.random() * 380);
+  if (gunsOut) {
+    // shot enemies get blasted backwards
+    best.vx = 750 + Math.random() * 450;
+    best.vy = -(220 + Math.random() * 240);
+  } else {
+    best.vx = 500 + Math.random() * 400;
+    best.vy = -(420 + Math.random() * 380);
+  }
   best.vr = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 7);
   P.combo++;
   P.maxCombo = Math.max(P.maxCombo, P.combo);
   P.comboPop = 1;
   const mult = 1 + Math.min(P.combo, 100) * 0.02;
-  P.score += Math.round((perfect ? 300 : 120) * mult * ch.scoreMult * P.diff.scoreMult);
+  const ultraMult = P.ultra ? 1.5 : 1;
+  P.score += Math.round((perfect ? 300 : 120) * mult * ch.scoreMult * P.diff.scoreMult * ultraMult);
   P.hp = Math.min(P.maxHp, P.hp + 0.8);
   if (perfect) P.counts.perfect++; else P.counts.good++;
   const ry = ROW_Y[lane];
@@ -187,17 +207,37 @@ function judge(lane) {
       str: bdSigned > 0 ? 'EARLY' : 'LATE', col: 'rgba(255,255,255,0.75)', rot: 0
     });
   }
-  if (perfect && Math.random() < 0.55) {
+  const powList = gunsOut ? GUNPOWS : POWS;
+  if (perfect && Math.random() < (gunsOut ? 0.8 : 0.55)) {
     P.texts.push({
       x: HIT_X + 90 + Math.random() * 60, y: ry - 120, t0: S.t, size: 40,
-      str: POWS[(Math.random() * POWS.length) | 0], col: LANE_COL[lane],
+      str: powList[(Math.random() * powList.length) | 0], col: LANE_COL[lane],
       rot: (Math.random() - 0.5) * 0.5, pow: true
     });
+  }
+  if (gunsOut) {
+    const px = PLAYER_X + P.gunX;
+    // tracer, muzzle smoke and a spinning shell casing
+    P.parts.push({ tracer: 1, x: px + 92, y: ry - 152, x2: HIT_X + 24, y2: ry - 96, life: 0.1, t: 0, col: '#fff3b0' });
+    P.parts.push({
+      shell: 1, x: px + 72, y: ry - 150, vx: -(70 + Math.random() * 90), vy: -(160 + Math.random() * 120),
+      rot: Math.random() * 6, vr: 9, life: 0.6, t: 0, col: '#ffd24a', w: 0
+    });
+    MUAudio.sfx('gunshot');
+  } else {
+    MUAudio.sfx(perfect ? 'punchPerfect' : 'punch');
   }
   burst(HIT_X + 30, ry - 90 * ROW_SC[lane], LANE_COL[lane], perfect ? 16 : 9);
   P.shake = perfect ? 7 : 4;
   if (perfect) P.flash = 0.12;
-  MUAudio.sfx(perfect ? 'punchPerfect' : 'punch');
+  // ULTIMATE: guns come out
+  const uAt = ch.ultraAt || 25;
+  if (!P.ultra && P.combo >= uAt) {
+    P.ultra = { state: 'intro', t0: S.t };
+    P.pose = { kind: 'draw', t0: S.t };
+    P.shake = 9; P.flash = 0.3;
+    MUAudio.sfx('ultra');
+  }
 }
 
 function burst(x, y, col, n) {
@@ -257,6 +297,21 @@ function update(dt) {
     }
   }
 
+  // ultimate state machine
+  if (P.ultra) {
+    if (P.ultra.state === 'intro') {
+      // grace: notes arriving during the cinematic are auto-perfect
+      for (const n of P.active) {
+        if (n.state === 'wait' && now >= n.time - 0.01) judge(n.lane);
+      }
+      if (S.t - P.ultra.t0 > 0.85) P.ultra.state = 'active';
+    }
+    P.gunX += ((P.ultra.state === 'active' ? -65 : 0) - P.gunX) * Math.min(1, dt * 6);
+  } else if (P.gunX !== 0) {
+    P.gunX += (0 - P.gunX) * Math.min(1, dt * 6);
+    if (Math.abs(P.gunX) < 0.5) P.gunX = 0;
+  }
+
   while (P.spawnIdx < P.notes.length && P.notes[P.spawnIdx].time - now <= P.info.approach + 0.05) {
     P.active.push(P.notes[P.spawnIdx]);
     P.spawnIdx++;
@@ -267,6 +322,7 @@ function update(dt) {
     if (n.state === 'wait' && now > n.time + GOOD_WIN * ch.winMult) {
       n.state = 'passed';
       P.combo = 0;
+      if (P.ultra) P.ultra = null; // guns away
       P.counts.miss++;
       P.hp -= P.diff.dmg;
       P.texts.push({ x: HIT_X + 50, y: ROW_Y[n.lane] - 195, t0: S.t, size: 26, str: 'MISS', col: '#ff5d5d', rot: 0 });
@@ -288,7 +344,8 @@ function update(dt) {
 
   for (const p of P.parts) {
     p.t += dt;
-    if (!p.ring) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; }
+    if (!p.ring && !p.tracer) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; }
+    if (p.shell) p.rot += p.vr * dt;
   }
   P.parts = P.parts.filter(p => p.t < p.life);
   P.texts = P.texts.filter(t => S.t - t.t0 < 0.8);
@@ -336,10 +393,10 @@ function menuBeat() {
 
 function renderTitle() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.45, hue: 265, flash: 0 });
-  [[470, 0], [640, 1], [810, 2]].forEach(([x, i]) => {
+  [[395, 0], [555, 1], [715, 2], [875, 3]].forEach(([x, i]) => {
     ctx.save();
     ctx.translate(x, 668);
-    ctx.scale(0.74, 0.74);
+    ctx.scale(0.7, 0.7);
     drawFighter(ctx, i, { kind: 'idle', beat: menuBeat() + i * 0.33 });
     ctx.restore();
   });
@@ -352,7 +409,7 @@ function renderTitle() {
   vignette(ctx);
 }
 
-const CHAR_PANELS = [[145, 110, 330, 500], [475, 110, 330, 500], [805, 110, 330, 500]];
+const CHAR_PANELS = [[80, 115, 270, 490], [375, 115, 270, 490], [670, 115, 270, 490], [965, 115, 270, 490]];
 
 function renderChar() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.4, hue: 265, flash: 0 });
@@ -373,14 +430,22 @@ function renderChar() {
     ctx.stroke();
     ctx.shadowBlur = 0;
     const cx = p[0] + p[2] / 2;
-    ctx.save();
-    ctx.translate(cx, p[1] + 400);
-    ctx.scale(1.06, 1.06);
-    drawFighter(ctx, i, { kind: sel ? 'win' : 'idle', beat: menuBeat() + i * 0.5, t: 1 });
-    ctx.restore();
-    neon(ctx, c.name, cx, p[1] + 440, 30, c.theme, sel ? 14 : 6);
-    txt(ctx, c.epithet, cx, p[1] + 466, 13, 'rgba(255,255,255,0.7)');
-    txt(ctx, c.perk, cx, p[1] + 488, 13, c.theme);
+    if (c.portrait) {
+      // static anime portrait
+      ctx.save();
+      ctx.translate(cx, p[1] + 185);
+      MUArt.drawPortrait(ctx, i, 1.02);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.translate(cx, p[1] + 385);
+      ctx.scale(0.95, 0.95);
+      drawFighter(ctx, i, { kind: sel ? 'win' : 'idle', beat: menuBeat() + i * 0.5, t: 1 });
+      ctx.restore();
+    }
+    neon(ctx, c.name, cx, p[1] + 422, 26, c.theme, sel ? 14 : 6);
+    txt(ctx, c.epithet, cx, p[1] + 446, 12, 'rgba(255,255,255,0.7)');
+    txt(ctx, c.perk, cx, p[1] + 468, 11.5, c.theme);
     ctx.restore();
   });
   txt(ctx, '←  →  SELECT      ENTER  GO      ESC  BACK', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
@@ -520,8 +585,11 @@ function renderPlay() {
 
   const py = lerp(ROW_Y[P.rowFrom], ROW_Y[P.row], easeOut(P.rowT));
   const psc = lerp(ROW_SC[P.rowFrom], ROW_SC[P.row], easeOut(P.rowT));
-  const poseT = clamp((S.t - P.pose.t0) / (P.pose.kind === 'punch' ? 0.22 : 0.4), 0, 1);
-  const poseKind = poseT >= 1 ? 'idle' : P.pose.kind;
+  const pvx = PLAYER_X + P.gunX;
+  const PDUR = { punch: 0.22, kick: 0.3, shoot: 0.16, hit: 0.4, draw: 0.85 };
+  const poseT = clamp((S.t - P.pose.t0) / (PDUR[P.pose.kind] || 0.3), 0, 1);
+  const baseKind = (P.ultra && P.ultra.state === 'active') ? 'gunidle' : 'idle';
+  const poseKind = poseT >= 1 ? baseKind : P.pose.kind;
 
   for (let l = 0; l < 4; l++) {
     for (const n of P.active) {
@@ -579,15 +647,15 @@ function renderPlay() {
       if (P.rowT < 0.45) {
         ctx.save();
         ctx.globalAlpha = 0.25;
-        ctx.translate(PLAYER_X, ROW_Y[P.rowFrom]);
+        ctx.translate(pvx, ROW_Y[P.rowFrom]);
         ctx.scale(ROW_SC[P.rowFrom], ROW_SC[P.rowFrom]);
-        drawFighter(ctx, P.charIdx, { kind: poseKind, t: poseT, beat });
+        drawFighter(ctx, P.charIdx, { kind: poseKind, t: poseT, beat, arm: P.pose.arm });
         ctx.restore();
       }
       ctx.save();
-      ctx.translate(PLAYER_X, py);
+      ctx.translate(pvx, py);
       ctx.scale(psc, psc);
-      drawFighter(ctx, P.charIdx, { kind: poseKind, t: poseT, beat });
+      drawFighter(ctx, P.charIdx, { kind: poseKind, t: poseT, beat, arm: P.pose.arm });
       ctx.restore();
     }
   }
@@ -597,7 +665,23 @@ function renderPlay() {
   ctx.globalCompositeOperation = 'lighter';
   for (const p of P.parts) {
     const a = 1 - p.t / p.life;
-    if (p.ring) {
+    if (p.tracer) {
+      ctx.strokeStyle = p.col;
+      ctx.globalAlpha = a;
+      ctx.lineWidth = 3.5 * a + 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x2, p.y2);
+      ctx.stroke();
+    } else if (p.shell) {
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.col;
+      ctx.fillRect(-3, -1.5, 6, 3);
+      ctx.restore();
+    } else if (p.ring) {
       ctx.strokeStyle = p.col;
       ctx.globalAlpha = a * 0.8;
       ctx.lineWidth = 4 * a;
@@ -642,11 +726,70 @@ function renderPlay() {
   vignette(ctx);
   ctx.restore();
 
+  if (P.ultra && P.ultra.state === 'intro') renderCutIn();
+
   if (P.paused) {
     ctx.fillStyle = 'rgba(3,2,8,0.7)';
     ctx.fillRect(0, 0, W, H);
     neon(ctx, 'PAUSED', W / 2, 330, 60, '#3ee6ff', 20);
     txt(ctx, 'ESC  RESUME       Q  QUIT', W / 2, 400, 20, 'rgba(255,255,255,0.7)');
+  }
+}
+
+/* slow-mo anime cut-in when the ultimate triggers: letterbox bars,
+   diagonal banner, radial speedlines, fighter drawing both guns */
+function renderCutIn() {
+  const ut = (S.t - P.ultra.t0) / 0.85;
+  const ch = CHARS[P.charIdx];
+  const bh = 80 * Math.min(1, ut * 4);
+  ctx.fillStyle = '#05030a';
+  ctx.fillRect(0, 0, W, bh);
+  ctx.fillRect(0, H - bh, W, bh);
+  ctx.fillStyle = 'rgba(5,3,10,0.5)';
+  ctx.fillRect(0, bh, W, H - 2 * bh);
+  const slide = (1 - easeOut(Math.min(1, ut * 1.8))) * -1000;
+  ctx.save();
+  ctx.translate(W / 2 + slide, H / 2);
+  ctx.rotate(-0.07);
+  const bw = 1500, bhh = 150;
+  const g = ctx.createLinearGradient(-bw / 2, 0, bw / 2, 0);
+  g.addColorStop(0, 'rgba(24,10,48,0)');
+  g.addColorStop(0.18, 'rgba(24,10,48,0.97)');
+  g.addColorStop(0.82, 'rgba(24,10,48,0.97)');
+  g.addColorStop(1, 'rgba(24,10,48,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(-bw / 2, -bhh, bw, bhh * 2);
+  ctx.strokeStyle = ch.theme; ctx.lineWidth = 3;
+  ctx.shadowColor = ch.theme; ctx.shadowBlur = 16;
+  ctx.beginPath(); ctx.moveTo(-bw / 2, -bhh); ctx.lineTo(bw / 2, -bhh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-bw / 2, bhh); ctx.lineTo(bw / 2, bhh); ctx.stroke();
+  ctx.shadowBlur = 0;
+  // radial speedlines
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-bw / 2, -bhh, bw, bhh * 2); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.13)';
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2 + S.t * 1.5;
+    ctx.lineWidth = 1 + (i % 3);
+    ctx.beginPath();
+    ctx.moveTo(-330 + Math.cos(a) * 40, 30 + Math.sin(a) * 20);
+    ctx.lineTo(-330 + Math.cos(a) * 950, 30 + Math.sin(a) * 520);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // fighter pulling both guns
+  ctx.save();
+  ctx.translate(-350, 142);
+  ctx.scale(1.6, 1.6);
+  drawFighter(ctx, P.charIdx, { kind: 'draw', t: Math.min(1, ut * 1.3), beat: 0 });
+  ctx.restore();
+  neon(ctx, 'ULTIMATE!', 170, -8, 62, ch.theme, 24);
+  neon(ctx, 'GUNS OUT', 170, 54, 30, '#fff', 12);
+  txt(ctx, `${ch.name}  ·  1.5× SCORE`, 170, 94, 16, 'rgba(255,255,255,0.8)');
+  ctx.restore();
+  if (ut < 0.15) {
+    ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - ut / 0.15)})`;
+    ctx.fillRect(0, 0, W, H);
   }
 }
 
@@ -662,6 +805,19 @@ function renderHUD(now, beat) {
     ctx.fill();
   }
   txt(ctx, ch.name, 30, 66, 15, ch.theme, 'left');
+  // ULT meter: fills toward the gun-mode threshold
+  const uAt = ch.ultraAt || 25;
+  const uf = P.ultra ? 1 : clamp(P.combo / uAt, 0, 1);
+  MUArt.rr(ctx, 28, 76, 180, 10, 5);
+  ctx.fillStyle = 'rgba(8,5,16,0.8)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1.5; ctx.stroke();
+  if (uf > 0) {
+    MUArt.rr(ctx, 30, 78, 176 * uf, 6, 3);
+    ctx.fillStyle = P.ultra ? `rgba(255,79,216,${0.7 + 0.3 * Math.sin(S.t * 10)})` : '#ff4fd8';
+    ctx.fill();
+  }
+  txt(ctx, P.ultra ? 'GUN MODE — 1.5×' : (uf >= 1 ? 'ULT READY!' : `ULT ${P.combo}/${uAt}`),
+    216, 86, 11, P.ultra ? '#ff4fd8' : 'rgba(255,255,255,0.6)', 'left');
   ctx.font = '30px "Russo One", sans-serif';
   ctx.textAlign = 'right';
   ctx.shadowColor = '#3ee6ff'; ctx.shadowBlur = 10;
@@ -748,8 +904,8 @@ addEventListener('keydown', e => {
       if (e.code === 'Enter' || e.code === 'Space') { ensureAudio(); MUAudio.sfx('uiSel'); S.scene = 'char'; }
       break;
     case 'char':
-      if (e.code === 'ArrowLeft') { S.selChar = (S.selChar + 2) % 3; MUAudio.sfx('uiMove'); }
-      else if (e.code === 'ArrowRight') { S.selChar = (S.selChar + 1) % 3; MUAudio.sfx('uiMove'); }
+      if (e.code === 'ArrowLeft') { S.selChar = (S.selChar + 3) % 4; MUAudio.sfx('uiMove'); }
+      else if (e.code === 'ArrowRight') { S.selChar = (S.selChar + 1) % 4; MUAudio.sfx('uiMove'); }
       else if (e.code === 'Enter') { MUAudio.sfx('uiSel'); S.scene = 'song'; }
       else if (e.code === 'Escape') { MUAudio.sfx('uiBack'); S.scene = 'title'; }
       break;
@@ -861,8 +1017,10 @@ window.__MU = {
   state: () => P ? {
     scene: S.scene, score: P.score, combo: P.combo, maxCombo: P.maxCombo,
     hp: P.hp, counts: P.counts, time: MUAudio.time(), diff: P.diff.id,
+    ultra: P.ultra ? P.ultra.state : null,
     active: P.active.length, spawned: P.spawnIdx, total: P.notes.length
   } : { scene: S.scene },
+  charge: () => { if (P) P.combo = (CHARS[P.charIdx].ultraAt || 25) - 1; },
   finish: () => { if (P && S.scene === 'play') finishSong(); },
   kill: () => { if (P && S.scene === 'play') { P.hp = 0; } },
   mute: v => MUAudio.setMuted(v !== false),
