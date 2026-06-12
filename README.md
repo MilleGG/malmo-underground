@@ -5,8 +5,9 @@ each one carries a **D / F / J / K** badge. Punch them **on the beat**: an
 approach ring closes onto each badge and flashes white exactly when you should
 strike.
 
-All music is synthesized live in the browser (Web Audio) — no audio files.
-All art is drawn in code on a canvas (cel-shaded anime style) — no image files.
+Music is MilleGG originals (real audio in `public/tracks/`) plus two
+synthesized tracks (Web Audio). All art is drawn in code on a canvas —
+or supplied as sprite PNGs under `assets/chars/<id>/`.
 
 ## Fighters
 
@@ -26,12 +27,16 @@ flash — at **1.5× score** until the combo breaks.
 
 ## Tracks
 
-1. **VÄSTRA HAMNEN VICE** — neon synthwave, 108 BPM ★
-2. **DAVIDSHALL DEEP** — deep house, 122 BPM ★
-3. **MÖLLAN MASSIV** — acid techno, 138 BPM ★★
-4. **KIRSEBERG KNUCKLE** — electro breaks, 126 BPM ★★
-5. **TRIANGELN OVERDRIVE** — hard dance, 150 BPM ★★★
-6. **ROSENGÅRD RUMBLE** — halftime bass, 142 BPM ★★★
+1. **ÖKA** — MilleGG original, 87 BPM ★
+2. **PARADISE NOBEL** — MilleGG original, 128 BPM ★★
+3. **ANAKONDHUS** — MilleGG original, halftime 169 ★★
+4. **MÖLLAN MASSIV** — acid techno (synth), 138 BPM ★★
+5. **NORRA GRÄNGESBERG** — MilleGG original, 138 BPM ★★★
+6. **TRIANGELN OVERDRIVE** — hard dance (synth), 150 BPM ★★★
+
+The lobby theme is also a MilleGG original. File-track BPM and first-beat
+offset are measured by onset autocorrelation; charts generate on the
+16th-note grid.
 
 Every track has **EASY / NORMAL / HARD** difficulty: hard is the full chart
 (doubles + 16th bursts), normal thins it to 8th notes, easy to quarter notes.

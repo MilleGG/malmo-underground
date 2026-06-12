@@ -395,39 +395,35 @@ const RH1 = [[0,48,2],[3,46,1],[4,43,2],[8,41,3],[12,43,2]];
 const RH2 = [[0,46,2],[4,48,2],[8,51,5]];
 const dFm = [12,15,19];
 
-/* lobby theme: slow-rolling g-funk — boom-bap drums with swing, deep sub,
-   whiny portamento whistle, dark minor pads */
-const GB1 = [[0,0,5],[7,0,2],[10,0,2],[12,12,2]];
-const GB2 = [[0,0,5],[7,0,2],[10,12,2],[12,0,3]];
+/* lobby theme: MilleGG's own track, looping */
 const MENU = {
-  id: 'menu', name: 'LOBBY', bpm: 91, rootHz: 55.0, loop: true, swing: 0.55,
-  kit: {
-    kick: { drop: 130, tail: 42, decay: 0.34, sub: 44 },
-    bass: { type: 'sine', cut: 420, q: 1, gain: 0.5, subOsc: true },
-    lead: { wave: 'sine', gain: 0.05, echo: 0.5, bend: true },
-    pad: { gain: 0.026, cut: 900 },
-    pluck: { gain: 0.055, type: 'square', cut: 2200, echo: 0.5 }
-  },
-  sections: [{
-    bars: 8, energy: 0.15,
-    kick: ['x......x..x.....', 'x......x..x...x.'],
-    snare: '....x.......x...',
-    hat: ['x.x.x.x.x.x.x.x.', 'x.x.x.x.x.x.x.xx'],
-    bass: [GB1, GB1, GB2, GB1],
-    chordSeq: [0,0,8,8],
-    pad: [vAm, vAm, vF, vF],
-    pluckp: [null, [[2,24,1],[6,27,1],[10,24,1],[14,31,1]]],
-    lead: [
-      [[0,60,5],[8,58,3],[12,55,3]],
-      [[0,55,9]],
-      [[0,58,4],[6,55,3],[10,53,3]],
-      [[0,51,10]]
-    ],
-    notes: [E16]
-  }]
+  id: 'menu', name: 'LOBBY', bpm: 99.75, loop: true,
+  file: 'tracks/lobby.mp3', offset: 0.135,
+  sections: [{ bars: 8, energy: 0.15, notes: [E16] }]
 };
 
-const TRACKS = [
+const ALL_TRACKS = [
+  /* ---- MilleGG originals (real audio files, charts on the beat grid) ---- */
+  {
+    id: 'oka', name: 'ÖKA', sub: 'MilleGG original · 87 BPM',
+    bpm: 86.9, hue: 100, approach: 2.0, stars: 1,
+    file: 'tracks/oka.mp3', offset: 0.352
+  },
+  {
+    id: 'paradise', name: 'PARADISE NOBEL', sub: 'MilleGG original · 128 BPM',
+    bpm: 127.85, hue: 45, approach: 1.9, stars: 2,
+    file: 'tracks/paradise-nobel.mp3', offset: 0.17
+  },
+  {
+    id: 'anakondhus', name: 'ANAKONDHUS', sub: 'MilleGG original · halftime 169',
+    bpm: 84.45, hue: 280, approach: 1.9, stars: 2,
+    file: 'tracks/anakondhus.mp3', offset: 0.63
+  },
+  {
+    id: 'norra', name: 'NORRA GRÄNGESBERG', sub: 'MilleGG original · 138 BPM',
+    bpm: 138.15, hue: 210, approach: 1.75, stars: 3,
+    file: 'tracks/norra-grangesberg.mp3', offset: 0.333
+  },
   {
     id: 'vice', name: 'VÄSTRA HAMNEN VICE', sub: 'neon synthwave · 108 BPM',
     bpm: 108, rootHz: 55.0, hue: 190, approach: 2.1, stars: 1,
@@ -723,6 +719,10 @@ const TRACKS = [
   }
 ];
 
+/* live track list + order — synth tracks not listed here stay dormant */
+const KEEP = ['oka', 'paradise', 'anakondhus', 'mollan', 'norra', 'triangeln'];
+const TRACKS = KEEP.map(id => ALL_TRACKS.find(t => t.id === id));
+
 /* ---------- sequencing ---------- */
 
 function barPat(p, b) {
@@ -737,8 +737,7 @@ function barPat(p, b) {
 
 function isFileTrack(tr) { return !!tr.file; }
 
-function prepare(i) {
-  const tr = TRACKS[i];
+function prepareTr(tr) {
   if (!tr || !isFileTrack(tr) || tr._buffer) return null; // nothing to load — stay synchronous
   ensure();
   if (!tr._loading) {
@@ -749,6 +748,7 @@ function prepare(i) {
   }
   return tr._loading;
 }
+function prepare(i) { return prepareTr(TRACKS[i]); }
 
 // deterministic chart patterns by intensity tier
 const GEN_LOW = ['d...f...j...k...', 'k...j...f...d...', 'd...j...f...k...', 'f...k...d...j...'];
@@ -929,6 +929,7 @@ function start(tr) {
     // player-supplied audio file: one buffer source on the same clock
     const src = ctx.createBufferSource();
     src.buffer = tr._buffer;
+    src.loop = !!tr.loop;
     src.connect(busM);
     src.start(startAt);
     cur._src = src;
@@ -1081,7 +1082,11 @@ return {
   unlock,
   play: i => start(TRACKS[i]),
   prepare,
-  playMenu: () => start(MENU),
+  playMenu: () => {
+    const p = prepareTr(MENU);
+    if (p) p.then(() => start(MENU)).catch(e => console.error('lobby load failed', e));
+    else start(MENU);
+  },
   stop,
   sfx,
   buildNotes,

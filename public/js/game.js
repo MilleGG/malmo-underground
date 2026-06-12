@@ -143,7 +143,7 @@ function beginPlay() {
     pose: { kind: 'idle', t0: -9 },
     parts: [], texts: [],
     shake: 0, flash: 0,
-    paused: false, autoplay: false,
+    paused: false, autoplay: !!S._autoplay,
     comboPop: 0, newBest: false,
     ultra: null, shotArm: 0, gunX: 0,
     now: -0.9 // smoothed song clock (drift-corrected toward audio clock)
@@ -503,8 +503,12 @@ function renderSong() {
     ctx.fillStyle = hcol; ctx.fill();
     ctx.restore();
     const words = info.name.split(' ');
-    neon(ctx, words.slice(0, words.length - 1).join(' '), cx, p[1] + 122, 16, hcol, sel ? 10 : 4);
-    neon(ctx, words[words.length - 1], cx, p[1] + 144, 16, hcol, sel ? 10 : 4);
+    if (words.length === 1) {
+      neon(ctx, words[0], cx, p[1] + 134, 17, hcol, sel ? 10 : 4);
+    } else {
+      neon(ctx, words.slice(0, words.length - 1).join(' '), cx, p[1] + 122, 16, hcol, sel ? 10 : 4);
+      neon(ctx, words[words.length - 1], cx, p[1] + 144, 16, hcol, sel ? 10 : 4);
+    }
     txt(ctx, info.sub, cx, p[1] + 166, 11, 'rgba(255,255,255,0.7)');
     let stars = '';
     for (let s = 0; s < 3; s++) stars += s < info.stars ? '★' : '☆';
@@ -1027,7 +1031,7 @@ window.__MU = {
     MUAudio.unlock(); startPlay();
   },
   hit: l => judge(l),
-  autoplay: v => { if (P) P.autoplay = v !== false; },
+  autoplay: v => { S._autoplay = v !== false; if (P) P.autoplay = S._autoplay; },
   state: () => P ? {
     scene: S.scene, score: P.score, combo: P.combo, maxCombo: P.maxCombo,
     hp: P.hp, counts: P.counts, time: MUAudio.time(), diff: P.diff.id,
