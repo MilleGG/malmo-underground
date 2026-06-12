@@ -339,6 +339,35 @@ const T3A2 = [[0,39,3],[4,43,3],[8,48,6]];
 const T3A3 = [[0,43,2],[2,41,1],[4,39,2],[8,36,4],[12,34,2]];
 const tFm = [12,15,19], tFm7 = [12,15,19,22], tDb = [13,17,20], tEb = [15,19,22];
 
+/* --- DAVIDSHALL DEEP (G minor deep house) --- */
+const gGm = [12,15,19,22], gBb = [15,19,22,27], gEb = [20,24,27,32], gF = [22,26,29,34];
+const DB = [[0,0,2],[3,0,1],[6,0,2],[10,12,1],[12,0,2],[15,12,1]];
+const DST = [[2,[24,27,31],1],[10,[24,27,31],1]];
+const DBELL = [[0,39,3],[6,43,3],[12,41,2]];
+const DH1 = [[0,43,2],[4,41,2],[8,39,2],[12,36,3]];
+const DH2 = [[0,41,2],[4,39,2],[8,36,5]];
+
+/* --- KIRSEBERG KNUCKLE (E minor electro breaks) --- */
+const BKICK = 'x.....x...x.....';
+const BSNARE = '....x.......x..x';
+const EB1 = [[0,0,1,1],[2,12,1],[4,0,1],[6,0,1],[7,12,1],[8,0,1,1],[10,15,1],[12,0,1],[14,12,1]];
+const EB2 = [[0,0,1,1],[2,12,1],[4,15,1],[6,12,1],[8,0,1,1],[10,0,1],[11,12,1],[12,17,1],[14,15,1]];
+const KP1 = [[0,36,1],[2,43,1],[4,39,1],[6,46,1],[8,36,1],[10,43,1],[12,41,1],[14,39,1]];
+const KST = [[2,[24,28,31],1],[6,[24,28,31],1],[10,[24,28,31],1]];
+const KH1 = [[0,39,2],[4,36,2],[8,43,3],[12,41,2]];
+const KH2 = [[0,39,2],[4,43,2],[8,48,4],[14,46,1]];
+
+/* --- ROSENGÅRD RUMBLE (D minor halftime bass) --- */
+const HKICK = 'x.........x.....';
+const HKICK2 = 'x.....x...x.....';
+const HSNARE = '........x.......';
+const HHAT2 = 'x.x.x.xxx.x.x.xx';
+const WB1 = [[0,0,2,1],[2,0,2],[4,0,2,1],[6,0,2],[8,0,2,1],[10,10,2],[12,12,2,1],[14,13,2]];
+const WB2 = [[0,0,2,1],[2,0,2],[4,6,2,1],[6,5,2],[8,0,2,1],[10,0,2],[12,15,2,1],[14,12,2]];
+const RH1 = [[0,48,2],[3,46,1],[4,43,2],[8,41,3],[12,43,2]];
+const RH2 = [[0,46,2],[4,48,2],[8,51,5]];
+const dFm = [12,15,19];
+
 const MENU = {
   id: 'menu', name: 'LOBBY', bpm: 106, rootHz: 55.0, loop: true,
   kit: { bass: { cut: 700, gain: 0.28, q: 2 }, pluck: { gain: 0.09 } },
@@ -408,6 +437,58 @@ const TRACKS = [
     ]
   },
   {
+    id: 'davidshall', name: 'DAVIDSHALL DEEP', sub: 'deep house · 122 BPM',
+    bpm: 122, rootHz: 49.0, hue: 150, approach: 2.0, stars: 1,
+    kit: {
+      kick: { drop: 140, tail: 45, decay: 0.28, sub: 46 },
+      bass: { cut: 750, q: 2, gain: 0.42, subOsc: true },
+      lead: { gain: 0.1, cut: 3800, echo: 0.45, det: 10 },
+      pad: { gain: 0.04, cut: 1200 },
+      pluck: { gain: 0.09, type: 'square', cut: 2800, echo: 0.6 },
+      stab: { gain: 0.055 },
+      bell: { gain: 0.09 }
+    },
+    sections: [
+      { bars: 4, energy: 0.15, hat: HOFF,
+        pad: [gGm],
+        bellp: [null, DBELL],
+        notes: [E16, E16, 'd.......j.......', 'f.......k.......'] },
+      { bars: 8, energy: 0.4, kick: K4, hat: HOPEN, clap: CL, shakerp: SHK,
+        bass: [DB], chordSeq: [0,0,3,3,8,8,10,10],
+        pad: [gGm, null, gBb, null, gEb, null, gF, null],
+        notes: ['d...f...j...k...','k...j...f...d...','d...j...f...k...','j...f...k...d...',
+                'd...f...j...k...','f...k...d...j...','d...j...d...j...','f...k...f.k.....'] },
+      { bars: 4, energy: 0.55, kick: K4, hat: H8,
+        clap: [CL, CL, K4, 'x...x...x.x.x.x.'],
+        bass: [DB], chordSeq: [8,8,10,10],
+        pad: [gEb, gEb, gF, gF],
+        fx: [['riser', 0, 16]],
+        notes: ['d...f...j...k...','k...j...f...d...','d...f...j...k...','d.f.j.k.........'] },
+      { bars: 8, energy: 0.8, kick: K4, hat: HOPEN, clap: CL, shakerp: SHK,
+        bass: [BOCT], chordSeq: [0,0,3,3,8,8,10,10],
+        pad: [gGm, gGm, gBb, gBb, gEb, gEb, gF, gF], padPump: true,
+        lead: [DH1, DH2],
+        stabp: [DST],
+        fx: [['crash', 0, 0]],
+        notes: ['d...f...j...k...','k...j.f.d.......','d...f...j...k...','j...k...f...d...',
+                'd.f.j...k...j...','k...j...f.d.....','d...f...j...k...','d.f.j.k.........'] },
+      { bars: 4, energy: 0.25, hat: HOFF,
+        pad: [gGm, gBb, gEb, gF],
+        bellp: [DBELL],
+        notes: ['d.......j.......','f.......k.......','d...f...j...k...', E16] },
+      { bars: 8, energy: 0.85, kick: K4, hat: HOPEN, clap: CL, shakerp: SHK,
+        bass: [BOCT], chordSeq: [0,0,3,3,8,8,10,10],
+        pad: [gGm, gGm, gBb, gBb, gEb, gEb, gF, gF], padPump: true,
+        lead: [DH1, DH2],
+        stabp: [DST],
+        fx: [['crash', 0, 0]],
+        notes: ['d...f...j...k...','j.f.d...j.f.d...','d...f...j...k...','k...j...f...d...',
+                'd.f.j...k.j.f...','d...f...j...k...','f.k.j...k.f.d...',['d...f...j...k...','k...............']] },
+      { bars: 2, energy: 0.15, kick: [K4, 'x...............'],
+        pad: [gGm], notes: [E16, E16] }
+    ]
+  },
+  {
     id: 'mollan', name: 'MÖLLAN MASSIV', sub: 'acid techno · 138 BPM',
     bpm: 138, rootHz: 55.0, hue: 315, approach: 1.85, stars: 2,
     kit: {
@@ -450,6 +531,52 @@ const TRACKS = [
         notes: ['d.j.f.k.j.d.k.f.','d...f...j...k...','df..jk..d...k...','j.k.f.d.j.k.f.d.',
                 'd...j...f...k...','df..jk..fd..kj..','d.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...']] },
       { bars: 2, energy: 0.2, kick: [K4, 'x...............'], notes: [E16, E16] }
+    ]
+  },
+  {
+    id: 'kirseberg', name: 'KIRSEBERG KNUCKLE', sub: 'electro breaks · 126 BPM',
+    bpm: 126, rootHz: 41.2, hue: 270, approach: 1.9, stars: 2,
+    kit: {
+      kick: { drop: 165, tail: 48, decay: 0.24, sub: 50 },
+      bass: { cut: 1300, q: 6, gain: 0.36 },
+      lead: { gain: 0.11, cut: 4200, echo: 0.3, det: 16 },
+      pluck: { gain: 0.11, type: 'square', cut: 3600, echo: 0.4 },
+      pad: { gain: 0.04 },
+      stab: { gain: 0.065 }
+    },
+    sections: [
+      { bars: 4, energy: 0.2, hat: H8,
+        kick: [E16, E16, BKICK, BKICK],
+        snare: [E16, E16, BSNARE, BSNARE],
+        notes: [E16, 'd.......j.......', 'f.......k.......', 'd...f...j...k...'] },
+      { bars: 8, energy: 0.5, kick: BKICK, snare: BSNARE, hat: H8, shakerp: SHK,
+        bass: [EB1, EB1, EB1, EB2],
+        notes: ['d...f.f.j...k...','j...k.k.f...d...','d...f...j.j.k...','k...j...f...d.d.',
+                'd...f.f.j...k...','j...k.k.f...d...','d.f.....j.k.....','d.f.j.k.j.f.....'] },
+      { bars: 4, energy: 0.65, kick: K4, hat: H8,
+        snare: [CL, '....x...x...x...', H8, H16],
+        bass: [EB1],
+        fx: [['riser', 0, 16]],
+        notes: ['d...d...f...f...','j...j...k...k...','d.f.j.k.d.f.j.k.','j.k.j.k.........'] },
+      { bars: 8, energy: 0.9, kick: BKICK, snare: BSNARE, hat: HOPEN, shakerp: SHK,
+        bass: [EB1, EB2],
+        stabp: [KST, null],
+        pluckp: [KP1],
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j...k.j.f...','d...j.k.f...k.j.','d.f.j...k.j.f...',['d...f...j...k...','j...............'],
+                'k.j.f...d.f.j...','f...j.k.d...j.k.','d.f.j...k.j.f...',['d.f.j.k.........','k.......d.......']] },
+      { bars: 4, energy: 0.3, hat: HOFF,
+        pad: [[12,15,19,24]],
+        pluckp: [[[0,43,2],[6,41,1],[8,39,2],[14,36,1]]],
+        notes: ['d.......j.......','f.......k.......','d.f.....j.k.....', E16] },
+      { bars: 8, energy: 1.0, kick: BKICK, snare: BSNARE, hat: HOPEN, shakerp: SHK,
+        bass: [EB1, EB2],
+        stabp: [KST, null],
+        lead: [KH1, KH2],
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j.k.d.f.j.k.','k.j.f.d.k.j.f.d.','d.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...'],
+                'df..jk..d...k...','kj..fd..j...f...','d.f.j.k.j.f.d...',['d.f.j.k.d.f.j.k.','........k.j.f.d.']] },
+      { bars: 2, energy: 0.2, kick: ['x...............', 'x...............'], notes: [E16, E16] }
     ]
   },
   {
@@ -496,6 +623,57 @@ const TRACKS = [
         notes: ['d.f.j.k.d.f.j.k.','df..jk..df..jk..','k...j...f...d...','jk..df..jk..df..',
                 'd.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...'],'d.f.j.k.j.f.d...','dfjk....dfjk....'] },
       { bars: 2, energy: 0.2, kick: [K4, 'x...............'],
+        fx: [['impact', 0, 0]], notes: [E16, E16] }
+    ]
+  },
+  {
+    id: 'rosengard', name: 'ROSENGÅRD RUMBLE', sub: 'halftime bass · 142 BPM',
+    bpm: 142, rootHz: 36.71, hue: 0, approach: 1.65, stars: 3,
+    kit: {
+      kick: { drop: 180, tail: 40, decay: 0.3, dist: true, sub: 42 },
+      bass: { cut: 900, q: 8, gain: 0.4, subOsc: true, cutEnd: 90 },
+      lead: { gain: 0.12, cut: 5000, echo: 0.3, det: 20 },
+      pad: { gain: 0.05, cut: 1000 },
+      pluck: { gain: 0.1, type: 'sawtooth', cut: 4200, echo: 0.5 }
+    },
+    sections: [
+      { bars: 4, energy: 0.25,
+        pad: [dFm],
+        kick: [E16, E16, HKICK, HKICK],
+        snare: [E16, E16, HSNARE, HSNARE],
+        hat: [E16, E16, H8, H8],
+        notes: [E16, 'd.......j.......', 'f.......k.......', 'd...f...j...k...'] },
+      { bars: 8, energy: 0.5, kick: HKICK, snare: HSNARE,
+        hat: [H8, HHAT2],
+        bass: [WB1],
+        notes: ['d.......j.......','f.......k.......','d...f...j.......','k...j...f.......',
+                'd.......j...k...','f.......d...j...','d...f...j...k...','d.f.j...k.j.....'] },
+      { bars: 4, energy: 0.7, kick: K4, hat: H8,
+        snare: [CL, '....x...x...x...', H8, H16],
+        bass: [WB1],
+        fx: [['riser', 0, 16]],
+        notes: ['d.d.f.f.j.j.k.k.','k.k.j.j.f.f.d.d.','d.f.j.k.d.f.j.k.','d.f.j.k.........'] },
+      { bars: 8, energy: 1.0, snare: HSNARE, hat: HHAT2,
+        kick: [HKICK, HKICK2],
+        bass: [WB1, WB1, WB2, WB1],
+        lead: [RH1, null, RH2, null],
+        pad: [dFm], padPump: true,
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j.k.d.f.j.k.','k...j...f...d...','d.j.d.j.f.k.f.k.',['d...f...j...k...','j...k...d...f...'],
+                'df..jk..df..jk..','k...f...j...d...','d.f.j.k.j.f.d...',['d.f.j.k.d.f.j.k.','............k...']] },
+      { bars: 4, energy: 0.3, hat: HOFF,
+        pad: [dFm],
+        arp: [arp16Of(36,39,41,43)],
+        notes: ['d...f...j...k...','k...j...f...d...','d.f.....j.k.....', E16] },
+      { bars: 8, energy: 1.0, snare: HSNARE, hat: HHAT2,
+        kick: [HKICK, HKICK2],
+        bass: [WB2, WB1],
+        lead: [RH1, RH2],
+        pad: [dFm], padPump: true,
+        fx: [['crash', 0, 0]],
+        notes: ['d.f.j.k.d.f.j.k.','df..jk..df..jk..','k.j.f.d.k.j.f.d.','jk..df..jk..df..',
+                'd.j.f.k.d.j.f.k.',['d...f...j...k...','k...j...f...d...'],'df..jk..kj..fd..','dfjk....dfjk....'] },
+      { bars: 2, energy: 0.2, kick: ['x...............', 'x...............'],
         fx: [['impact', 0, 0]], notes: [E16, E16] }
     ]
   }

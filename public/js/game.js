@@ -14,7 +14,12 @@ const ROW_Y = [398, 452, 506, 560];
 const ROW_SC = [0.8, 0.87, 0.94, 1.0];
 const PLAYER_X = 285, HIT_X = 430, SPAWN_X = 1370;
 const PERF_WIN = 0.085, GOOD_WIN = 0.18;
-const MISS_DMG = 9;
+/* difficulty tiers: hard = charts as authored; normal/easy are thinned */
+const DIFFS = [
+  { id: 'easy', name: 'EASY', col: '#7dff5e', dmg: 6, scoreMult: 0.8 },
+  { id: 'normal', name: 'NORMAL', col: '#3ee6ff', dmg: 9, scoreMult: 1.0 },
+  { id: 'hard', name: 'HARD', col: '#ff5d5d', dmg: 12, scoreMult: 1.25 }
+];
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -38,6 +43,8 @@ const S = {
   t: 0,
   selChar: 0,
   selSong: 0,
+  selDiff: 1,
+  diffOpen: false,
   audioOn: false
 };
 let P = null;
@@ -62,12 +69,40 @@ function txt(c, str, x, y, size, col, align, font) {
   c.fillText(str, x, y);
 }
 
-function bestKey(songIdx) { return 'mu_best_' + MUAudio.trackInfo(songIdx).id; }
-function loadBest(songIdx) {
-  try { return JSON.parse(localStorage.getItem(bestKey(songIdx))); } catch (e) { return null; }
+function bestKey(songIdx, diffIdx) {
+  return 'mu_best_' + MUAudio.trackInfo(songIdx).id + '_' + DIFFS[diffIdx].id;
 }
-function saveBest(songIdx, rec) {
-  try { localStorage.setItem(bestKey(songIdx), JSON.stringify(rec)); } catch (e) {}
+function loadBest(songIdx, diffIdx) {
+  try { return JSON.parse(localStorage.getItem(bestKey(songIdx, diffIdx))); } catch (e) { return null; }
+}
+function saveBest(songIdx, diffIdx, rec) {
+  try { localStorage.setItem(bestKey(songIdx, diffIdx), JSON.stringify(rec)); } catch (e) {}
+}
+function bestAny(songIdx) {
+  let top = null;
+  for (let d = 0; d < 3; d++) {
+    const b = loadBest(songIdx, d);
+    if (b && (!top || b.score > top.score)) top = Object.assign({ diff: DIFFS[d].name }, b);
+  }
+  return top;
+}
+
+/* hard = full chart; normal = 8ths max, no doubles, ≥0.27s between notes;
+   easy = quarters only, no doubles, ≥0.55s between notes (scales with BPM) */
+function filterNotes(raw, diffId) {
+  if (diffId === 'hard') return raw;
+  const eighth = diffId === 'normal';
+  const minGapT = eighth ? 0.27 : 0.55;
+  const out = [];
+  let lastT = -9;
+  for (const n of raw) {
+    const q = Math.round(n.beat * 4);
+    if (eighth ? (q % 2 !== 0) : (q % 4 !== 0)) continue;
+    if (n.time - lastT < minGapT - 1e-6) continue;
+    out.push(n);
+    lastT = n.time;
+  }
+  return out;
 }
 
 function ensureAudio() {
@@ -79,11 +114,12 @@ function ensureAudio() {
 
 function startPlay() {
   const songIdx = S.selSong, charIdx = S.selChar;
-  const raw = MUAudio.buildNotes(songIdx);
+  const diff = DIFFS[S.selDiff];
+  const raw = filterNotes(MUAudio.buildNotes(songIdx), diff.id);
   const info = MUAudio.trackInfo(songIdx);
   const ch = CHARS[charIdx];
   P = {
-    songIdx, charIdx, info,
+    songIdx, charIdx, info, diffIdx: S.selDiff, diff,
     notes: raw.map((n, i) => ({
       time: n.time, beat: n.beat, lane: n.lane, state: 'wait',
       v: (i * 7 + n.lane) % 3, seed: i * 1.7,
@@ -136,7 +172,7 @@ function judge(lane) {
   P.maxCombo = Math.max(P.maxCombo, P.combo);
   P.comboPop = 1;
   const mult = 1 + Math.min(P.combo, 100) * 0.02;
-  P.score += Math.round((perfect ? 300 : 120) * mult * ch.scoreMult);
+  P.score += Math.round((perfect ? 300 : 120) * mult * ch.scoreMult * P.diff.scoreMult);
   P.hp = Math.min(P.maxHp, P.hp + 0.8);
   if (perfect) P.counts.perfect++; else P.counts.good++;
   const ry = ROW_Y[lane];
@@ -188,10 +224,10 @@ function finishSong() {
   const rank = (P.counts.miss === 0 && acc >= 0.96) ? 'S'
     : acc >= 0.92 ? 'A' : acc >= 0.84 ? 'B' : acc >= 0.7 ? 'C' : 'D';
   P.acc = acc; P.rank = rank;
-  const prev = loadBest(P.songIdx);
+  const prev = loadBest(P.songIdx, P.diffIdx);
   if (!prev || P.score > prev.score) {
     P.newBest = true;
-    saveBest(P.songIdx, { score: P.score, rank, acc: Math.round(acc * 100), charId: CHARS[P.charIdx].id });
+    saveBest(P.songIdx, P.diffIdx, { score: P.score, rank, acc: Math.round(acc * 100), charId: CHARS[P.charIdx].id });
   }
   S.scene = 'results';
 }
@@ -232,7 +268,7 @@ function update(dt) {
       n.state = 'passed';
       P.combo = 0;
       P.counts.miss++;
-      P.hp -= MISS_DMG;
+      P.hp -= P.diff.dmg;
       P.texts.push({ x: HIT_X + 50, y: ROW_Y[n.lane] - 195, t0: S.t, size: 26, str: 'MISS', col: '#ff5d5d', rot: 0 });
       P.pose = { kind: 'hit', t0: S.t };
       P.shake = 5;
@@ -351,53 +387,89 @@ function renderChar() {
   vignette(ctx);
 }
 
-const SONG_CARDS = [[160, 150, 330, 400], [475, 150, 330, 400], [790, 150, 330, 400]];
+const SONG_CARDS = [];
+for (let i = 0; i < 6; i++) {
+  SONG_CARDS.push([160 + (i % 3) * 315, 118 + Math.floor(i / 3) * 252, 300, 236]);
+}
+const DIFF_ROWS = [0, 1, 2].map(i => [400, 296 + i * 62, 480, 54]);
 
 function renderSong() {
   drawBG(ctx, { t: S.t, beat: menuBeat(), energy: 0.4, hue: 265, flash: 0 });
   ctx.fillStyle = 'rgba(3,2,8,0.55)';
   ctx.fillRect(0, 0, W, H);
-  neon(ctx, 'PICK YOUR TRACK', W / 2, 90, 40, '#3ee6ff', 18);
+  neon(ctx, 'PICK YOUR TRACK', W / 2, 78, 36, '#3ee6ff', 18);
   SONG_CARDS.forEach((p, i) => {
+    if (i >= MUAudio.trackCount()) return;
     const sel = i === S.selSong;
     const info = MUAudio.trackInfo(i);
     ctx.save();
-    if (sel) ctx.translate(0, -6 + Math.sin(S.t * 5) * 3);
-    MUArt.rr(ctx, p[0], p[1], p[2], p[3], 18);
+    if (sel) ctx.translate(0, -4 + Math.sin(S.t * 5) * 2);
+    MUArt.rr(ctx, p[0], p[1], p[2], p[3], 14);
     const hcol = `hsl(${info.hue}, 95%, 60%)`;
     ctx.fillStyle = sel ? 'rgba(28,16,52,0.92)' : 'rgba(12,8,24,0.85)';
     ctx.fill();
     ctx.strokeStyle = sel ? hcol : 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = sel ? 4 : 2;
-    if (sel) { ctx.shadowColor = hcol; ctx.shadowBlur = 18; }
+    ctx.lineWidth = sel ? 3.5 : 2;
+    if (sel) { ctx.shadowColor = hcol; ctx.shadowBlur = 16; }
     ctx.stroke();
     ctx.shadowBlur = 0;
     const cx = p[0] + p[2] / 2;
     ctx.save();
-    ctx.translate(cx, p[1] + 120);
+    ctx.translate(cx, p[1] + 58);
     ctx.rotate(sel ? S.t * 1.8 : 0.4);
-    ctx.beginPath(); ctx.arc(0, 0, 64, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.arc(0, 0, 36, 0, Math.PI * 2);
     ctx.fillStyle = '#0c0a14'; ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.6;
-    for (let r = 20; r < 60; r += 9) { ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke(); }
-    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.4;
+    for (let r = 12, n = 0; n < 4; r += 6, n++) { ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2);
     ctx.fillStyle = hcol; ctx.fill();
     ctx.restore();
     const words = info.name.split(' ');
-    neon(ctx, words.slice(0, words.length - 1).join(' '), cx, p[1] + 235, 24, hcol, sel ? 12 : 5);
-    neon(ctx, words[words.length - 1], cx, p[1] + 268, 24, hcol, sel ? 12 : 5);
-    txt(ctx, info.sub, cx, p[1] + 296, 14, 'rgba(255,255,255,0.7)');
+    neon(ctx, words.slice(0, words.length - 1).join(' '), cx, p[1] + 122, 16, hcol, sel ? 10 : 4);
+    neon(ctx, words[words.length - 1], cx, p[1] + 144, 16, hcol, sel ? 10 : 4);
+    txt(ctx, info.sub, cx, p[1] + 166, 11, 'rgba(255,255,255,0.7)');
     let stars = '';
     for (let s = 0; s < 3; s++) stars += s < info.stars ? '★' : '☆';
-    txt(ctx, stars, cx, p[1] + 326, 22, '#ffd24a');
-    const best = loadBest(i);
-    txt(ctx, best ? `BEST  ${best.score}  [${best.rank}]` : 'NO RECORD YET', cx, p[1] + 360, 14,
+    txt(ctx, stars, cx, p[1] + 190, 16, '#ffd24a');
+    const best = bestAny(i);
+    txt(ctx, best ? `BEST ${best.score} [${best.rank}·${best.diff}]` : 'NO RECORD YET', cx, p[1] + 216, 11,
       best ? '#7dff5e' : 'rgba(255,255,255,0.4)');
     ctx.restore();
   });
-  txt(ctx, `FIGHTER: ${CHARS[S.selChar].name}`, W / 2, 615, 18, CHARS[S.selChar].theme);
-  txt(ctx, '←  →  SELECT      ENTER  GO      ESC  BACK', W / 2, 680, 16, 'rgba(255,255,255,0.55)');
+  txt(ctx, `FIGHTER: ${CHARS[S.selChar].name}`, W / 2, 648, 16, CHARS[S.selChar].theme);
+  txt(ctx, '←  →  ↑  ↓  SELECT      ENTER  GO      ESC  BACK', W / 2, 684, 14, 'rgba(255,255,255,0.55)');
   vignette(ctx);
+
+  if (S.diffOpen) {
+    const info = MUAudio.trackInfo(S.selSong);
+    ctx.fillStyle = 'rgba(3,2,8,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    MUArt.rr(ctx, 360, 178, 560, 322, 18);
+    ctx.fillStyle = 'rgba(18,10,34,0.97)'; ctx.fill();
+    ctx.strokeStyle = `hsl(${info.hue}, 95%, 60%)`; ctx.lineWidth = 3;
+    ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 16;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    neon(ctx, info.name, W / 2, 226, 22, `hsl(${info.hue}, 95%, 60%)`, 10);
+    txt(ctx, 'SELECT DIFFICULTY', W / 2, 258, 15, 'rgba(255,255,255,0.7)');
+    DIFF_ROWS.forEach((r, i) => {
+      const d = DIFFS[i];
+      const sel = i === S.selDiff;
+      MUArt.rr(ctx, r[0], r[1], r[2], r[3], 10);
+      ctx.fillStyle = sel ? 'rgba(40,24,70,0.95)' : 'rgba(10,6,20,0.9)';
+      ctx.fill();
+      ctx.strokeStyle = sel ? d.col : 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = sel ? 3 : 1.5;
+      if (sel) { ctx.shadowColor = d.col; ctx.shadowBlur = 12; }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      txt(ctx, d.name, r[0] + 24, r[1] + 34, 19, d.col, 'left');
+      const b = loadBest(S.selSong, i);
+      txt(ctx, b ? `BEST ${b.score} [${b.rank}]` : '—', r[0] + r[2] - 24, r[1] + 33, 13,
+        b ? '#7dff5e' : 'rgba(255,255,255,0.35)', 'right');
+    });
+    txt(ctx, '↑  ↓  SELECT      ENTER  FIGHT      ESC  BACK', W / 2, 488, 13, 'rgba(255,255,255,0.55)');
+  }
 }
 
 function renderPlay() {
@@ -610,6 +682,8 @@ function renderHUD(now, beat) {
   ctx.fillStyle = `hsl(${P.info.hue}, 95%, 60%)`;
   ctx.fillRect(0, H - 6, W * prog, 6);
   txt(ctx, P.info.name, 28, H - 18, 14, 'rgba(255,255,255,0.5)', 'left');
+  const nw = ctx.measureText(P.info.name).width;
+  txt(ctx, P.diff.name, 28 + nw + 16, H - 18, 14, P.diff.col, 'left');
 }
 
 function renderResults() {
@@ -627,6 +701,7 @@ function renderResults() {
   txt(ctx, 'RANK', 330, 430, 20, 'rgba(255,255,255,0.6)');
   const lx = 560, vx = 880;
   const rows = [
+    ['DIFFICULTY', P.diff.name, P.diff.col],
     ['SCORE', String(P.score).padStart(7, '0'), '#fff'],
     ['PERFECT', P.counts.perfect, '#ffd24a'],
     ['GOOD', P.counts.good, '#3ee6ff'],
@@ -635,9 +710,9 @@ function renderResults() {
     ['ACCURACY', Math.round(P.acc * 100) + '%', '#7dff5e']
   ];
   rows.forEach((r, i) => {
-    const y = 210 + i * 46;
-    txt(ctx, r[0], lx, y, 20, 'rgba(255,255,255,0.65)', 'left');
-    txt(ctx, String(r[1]), vx, y, 22, r[2], 'right');
+    const y = 196 + i * 42;
+    txt(ctx, r[0], lx, y, 19, 'rgba(255,255,255,0.65)', 'left');
+    txt(ctx, String(r[1]), vx, y, 21, r[2], 'right');
   });
   if (P.newBest) neon(ctx, 'NEW RECORD!', 720, 510, 30, '#ffd24a', 16);
   ctx.save();
@@ -678,12 +753,22 @@ addEventListener('keydown', e => {
       else if (e.code === 'Enter') { MUAudio.sfx('uiSel'); S.scene = 'song'; }
       else if (e.code === 'Escape') { MUAudio.sfx('uiBack'); S.scene = 'title'; }
       break;
-    case 'song':
-      if (e.code === 'ArrowLeft') { S.selSong = (S.selSong + 2) % 3; MUAudio.sfx('uiMove'); }
-      else if (e.code === 'ArrowRight') { S.selSong = (S.selSong + 1) % 3; MUAudio.sfx('uiMove'); }
-      else if (e.code === 'Enter') { MUAudio.sfx('uiSel'); startPlay(); }
-      else if (e.code === 'Escape') { MUAudio.sfx('uiBack'); S.scene = 'char'; }
+    case 'song': {
+      const n = MUAudio.trackCount();
+      if (S.diffOpen) {
+        if (e.code === 'ArrowUp') { S.selDiff = (S.selDiff + 2) % 3; MUAudio.sfx('uiMove'); }
+        else if (e.code === 'ArrowDown') { S.selDiff = (S.selDiff + 1) % 3; MUAudio.sfx('uiMove'); }
+        else if (e.code === 'Enter') { S.diffOpen = false; MUAudio.sfx('uiSel'); startPlay(); }
+        else if (e.code === 'Escape') { S.diffOpen = false; MUAudio.sfx('uiBack'); }
+      } else {
+        if (e.code === 'ArrowLeft') { S.selSong = (S.selSong + n - 1) % n; MUAudio.sfx('uiMove'); }
+        else if (e.code === 'ArrowRight') { S.selSong = (S.selSong + 1) % n; MUAudio.sfx('uiMove'); }
+        else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') { S.selSong = (S.selSong + 3) % n; MUAudio.sfx('uiMove'); }
+        else if (e.code === 'Enter') { S.diffOpen = true; MUAudio.sfx('uiSel'); }
+        else if (e.code === 'Escape') { MUAudio.sfx('uiBack'); S.scene = 'char'; }
+      }
       break;
+    }
     case 'play':
       if (e.code in LANE_CODES && !P.paused) judge(LANE_CODES[e.code]);
       else if (e.code === 'Escape') {
@@ -728,12 +813,24 @@ function pointerDown(e) {
       });
       break;
     case 'song':
-      SONG_CARDS.forEach((r, i) => {
-        if (inRect(p, r)) {
-          if (S.selSong === i) { MUAudio.sfx('uiSel'); startPlay(); }
-          else { S.selSong = i; MUAudio.sfx('uiMove'); }
-        }
-      });
+      if (S.diffOpen) {
+        let hitRow = false;
+        DIFF_ROWS.forEach((r, i) => {
+          if (inRect(p, r)) {
+            hitRow = true;
+            if (S.selDiff === i) { S.diffOpen = false; MUAudio.sfx('uiSel'); startPlay(); }
+            else { S.selDiff = i; MUAudio.sfx('uiMove'); }
+          }
+        });
+        if (!hitRow && !inRect(p, [360, 178, 560, 322])) { S.diffOpen = false; MUAudio.sfx('uiBack'); }
+      } else {
+        SONG_CARDS.forEach((r, i) => {
+          if (i < MUAudio.trackCount() && inRect(p, r)) {
+            if (S.selSong === i) { S.diffOpen = true; MUAudio.sfx('uiSel'); }
+            else { S.selSong = i; MUAudio.sfx('uiMove'); }
+          }
+        });
+      }
       break;
     case 'play':
       if (!P.paused) judge(clamp(Math.floor(p[0] / W * 4), 0, 3));
@@ -752,14 +849,18 @@ canvas.addEventListener('touchstart', e => { e.preventDefault(); ensureAudio(); 
 /* ---------------- debug handle ---------------- */
 
 window.__MU = {
-  version: '2.0.0',
+  version: '2.1.0',
   scene: () => S.scene,
-  start: (c, s) => { S.selChar = c || 0; S.selSong = s || 0; MUAudio.unlock(); startPlay(); },
+  start: (c, s, d) => {
+    S.selChar = c || 0; S.selSong = s || 0;
+    S.selDiff = d === undefined ? 1 : d;
+    MUAudio.unlock(); startPlay();
+  },
   hit: l => judge(l),
   autoplay: v => { if (P) P.autoplay = v !== false; },
   state: () => P ? {
     scene: S.scene, score: P.score, combo: P.combo, maxCombo: P.maxCombo,
-    hp: P.hp, counts: P.counts, time: MUAudio.time(),
+    hp: P.hp, counts: P.counts, time: MUAudio.time(), diff: P.diff.id,
     active: P.active.length, spawned: P.spawnIdx, total: P.notes.length
   } : { scene: S.scene },
   finish: () => { if (P && S.scene === 'play') finishSong(); },

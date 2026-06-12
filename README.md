@@ -19,8 +19,15 @@ All art is drawn in code on a canvas (cel-shaded anime style) — no image files
 ## Tracks
 
 1. **VÄSTRA HAMNEN VICE** — neon synthwave, 108 BPM ★
-2. **MÖLLAN MASSIV** — acid techno, 138 BPM ★★
-3. **TRIANGELN OVERDRIVE** — hard dance, 150 BPM ★★★
+2. **DAVIDSHALL DEEP** — deep house, 122 BPM ★
+3. **MÖLLAN MASSIV** — acid techno, 138 BPM ★★
+4. **KIRSEBERG KNUCKLE** — electro breaks, 126 BPM ★★
+5. **TRIANGELN OVERDRIVE** — hard dance, 150 BPM ★★★
+6. **ROSENGÅRD RUMBLE** — halftime bass, 142 BPM ★★★
+
+Every track has **EASY / NORMAL / HARD** difficulty: hard is the full chart
+(doubles + 16th bursts), normal thins it to 8th notes, easy to quarter notes.
+Higher difficulty deals more miss damage but pays more score.
 
 ## Controls
 
