@@ -544,8 +544,17 @@ function processSprite(img) {
   // background colour from the four corners
   const cs = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
   const bg = [0, 1, 2].map(k => cs.reduce((s, i) => s + d[i + k], 0) / 4);
-  const tol = 16;
-  const isBg = i => Math.abs(d[i] - bg[0]) < tol && Math.abs(d[i + 1] - bg[1]) < tol && Math.abs(d[i + 2] - bg[2]) < tol;
+  const tol = 22;
+  const near = i => Math.abs(d[i] - bg[0]) < tol && Math.abs(d[i + 1] - bg[1]) < tol && Math.abs(d[i + 2] - bg[2]) < tol;
+  // floodable: the bg colour OR a neutral light pixel (the soft contact shadow),
+  // so the fill can travel through the shadow into white pockets between the legs.
+  // dark outlines and saturated character colours block it, so interiors survive.
+  const isBg = i => {
+    if (near(i)) return true;
+    const r = d[i], gg = d[i + 1], b = d[i + 2];
+    const sat = Math.max(r, gg, b) - Math.min(r, gg, b);
+    return sat < 26 && (r + gg + b) / 3 > 198;
+  };
   const visited = new Uint8Array(w * h);
   const stack = [];
   for (let x = 0; x < w; x++) { stack.push(x, x + (h - 1) * w); }
@@ -600,27 +609,48 @@ function drawSprite(ctx, ch, spr, pose) {
   const beat = pose.beat || 0;
   const H = ch.sprH || 280;
   const wid = spr.width / spr.height * H;
-  let dx = 0, dy = 0, rot = 0, sx = 1, sy = 1;
-  const float = ch.sprFloat ? -24 - Math.sin(beat * Math.PI) * 7 : 0;
+  const floatY = ch.sprFloat ? -24 - Math.sin(beat * Math.PI) * 7 : 0;
+
+  // easing: anticipation dip then thrust-with-overshoot-and-settle
+  const backEase = (u) => u * u * (2.7 * u - 1.7);
+  const overshoot = (u) => { u -= 1; return u * u * (2.9 * u + 1.9) + 1; };
+  const c01 = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+  const smooth01 = (x) => { x = c01(x); return x * x * (3 - 2 * x); };
+
+  // ---- pose channels ----
+  // bodyDX: small whole-body step. rot: foot-pivot pitch. sx/sy: area-conserving breath.
+  // leanA/lungeA/recoilA: strip-warp amounts (the drawing BENDS by height).
+  let bodyDX = 0, dy = 0, rot = 0, sx = 1, sy = 1;
+  let leanA = 0, lungeA = 0, recoilA = 0;
   let ext = 0, kext = 0, rec = 0;
+
   if (k === 'idle' || k === 'gunidle' || k === 'win') {
     dy = -Math.abs(Math.sin(beat * Math.PI)) * 5;
-    rot = Math.sin(beat * Math.PI / 2) * 0.02;
-    sy = 1 + Math.sin(beat * TAU) * 0.007;
+    sy = 1 + Math.sin(beat * TAU) * 0.022;     // breathe
+    sx = 1 / Math.sqrt(sy);                     // conserve area -> reads as breath
+    rot = Math.sin(beat * Math.PI / 2) * 0.014;
+    leanA = Math.sin(beat * Math.PI) * 5;       // gentle cantilever sway
   }
   if (k === 'punch') {
-    ext = t < 0.34 ? easeOut(t / 0.34) : 1 - (t - 0.34) / 0.66 * 0.75;
-    dx = ext * 34; rot = ext * 0.09; sx = 1 + ext * 0.05;
+    const e = t < 0.18 ? -0.16 * easeOut(t / 0.18) : overshoot((t - 0.18) / 0.82);
+    ext = e;                                    // FX gate uses ext > 0.55
+    lungeA = e * 36; bodyDX = Math.max(0, e) * 11; rot = Math.max(0, e) * 0.10;
+    sx = 1 + Math.max(0, e) * 0.05; sy = 1 - Math.max(0, e) * 0.03;
   }
   if (k === 'kick') {
     kext = t < 0.36 ? easeOut(t / 0.36) : 1 - (t - 0.36) / 0.64 * 0.7;
-    dx = kext * 26; rot = -kext * 0.07;
+    lungeA = kext * 28; bodyDX = kext * 9; rot = -kext * 0.05;
   }
-  if (k === 'hit') { const ht = Math.sin(t * Math.PI); dx = -ht * 22; rot = -ht * 0.12; }
+  if (k === 'hit') { const ht = Math.sin(t * Math.PI); recoilA = ht * 30; bodyDX = -ht * 10; rot = -ht * 0.12; }
   if (k === 'gunidle') rot -= 0.03;
-  if (k === 'shoot') { rec = 1 - t; rot = -0.03 - rec * 0.05; dx = -rec * 6; }
-  if (k === 'draw') { rot = -0.06 * (1 - t); dx = -10 * (1 - t); }
+  if (k === 'shoot') { rec = 1 - t; rot = -0.03 - rec * 0.05; bodyDX = -rec * 6; recoilA = rec * 9; }
+  if (k === 'draw') { rot = -0.06 * (1 - t); bodyDX = -10 * (1 - t); leanA -= 8 * (1 - t); }
   if (k === 'win') dy -= 4;
+
+  // height-driven horizontal warp. v: 0 at feet, 1 at head.
+  const warpDX = (v) => leanA * v * v + lungeA * smooth01((v - 0.12) / 0.88) - recoilA * v;
+  // FX anchor x = where the upper-body thrust lands
+  const dx = ch.sprFloat ? (bodyDX + lungeA * 0.85 - recoilA * 0.85) : (bodyDX + warpDX(0.62));
 
   // soft glow under a floating character
   if (ch.sprFloat) {
@@ -633,11 +663,35 @@ function drawSprite(ctx, ch, spr, pose) {
     ctx.beginPath(); ctx.ellipse(0, -4, wid * 0.45, 11, 0, 0, TAU); ctx.fill();
     ctx.restore();
   }
+
   ctx.save();
-  ctx.translate(dx, dy + float);
-  ctx.rotate(rot);
-  ctx.scale(sx, sy);
-  ctx.drawImage(spr, -wid / 2, -H, wid, H);
+  if (ch.sprFloat) {
+    // floating angel: surge + tilt the INTACT sprite (no foot-planted bend)
+    ctx.translate(dx, dy + floatY);
+    ctx.rotate(rot);
+    ctx.scale(sx, sy);
+    ctx.drawImage(spr, -wid / 2, -H, wid, H);
+  } else {
+    // strip-warp: the drawing bends as one seamless sheet, feet planted.
+    ctx.translate(bodyDX, dy + floatY);
+    ctx.rotate(rot);
+    ctx.scale(sx, sy);
+    const N = 30, srcW = spr.width, srcH = spr.height;
+    let prevDest = Math.round(-H);
+    for (let i = 0; i < N; i++) {
+      const s0 = Math.round(srcH * i / N), s1 = Math.round(srcH * (i + 1) / N);
+      const sh = s1 - s0;
+      if (sh <= 0) continue;
+      const dTop = prevDest;
+      const dBot = Math.round(-H + H * (i + 1) / N);
+      prevDest = dBot;
+      const dh = dBot - dTop;
+      if (dh <= 0) continue;
+      const v = 1 - (i + 0.5) / N;             // band centre height (1=head .. 0=feet)
+      const off = warpDX(v);
+      ctx.drawImage(spr, 0, s0, srcW, sh, -wid / 2 + off, dTop, wid, dh);
+    }
+  }
   ctx.restore();
 
   // anime slash crescent + speedlines on strikes
